@@ -1,0 +1,17 @@
+<launch>
+  
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    
+    <env name="GAZEBO_RESOURCE_PATH" value="$(env GAZEBO_RESOURCE_PATH):$(find orbit_sim)" />
+    <arg name="verbose" value="true" />
+    <arg name="world_name" value="worlds/create.world" />
+    <arg name="paused" value="false" />
+    <arg name="use_sim_time" value="true" />
+    <arg name="gui" value="true" />
+    <arg name="recording" value="true" />
+    <arg name="debug" value="false" />
+  </include>
+  <node args="-file $(find orbit_sim)/models/fullModel.sdf -sdf -z 1 -model payload" name="spawn_sdf" pkg="gazebo_ros" type="spawn_model" />
+  <node args="/gazebo/link_states 30 31 /gazebo/link_states_drop" name="link_drop" pkg="topic_tools" type="drop" />
+  <node name="reference" pkg="orbit_sim" type="refSignal" />
+</launch>

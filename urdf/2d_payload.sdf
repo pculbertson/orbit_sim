@@ -1,0 +1,42 @@
+<?xml version='1.0'?>
+<sdf version="1.4">
+<model name="payload">
+  <link name="body">
+    <visual name="payload_vis">
+      <geometry>
+        <box>
+          <size>1 1 1</size>
+        </box>
+      </geometry>
+    </visual>
+    <collision name="payload_col">
+      <geometry>
+      	<box>
+          <size>1 1 1</size>
+        </box>
+      </geometry>
+      <surface>
+        <friction>
+          <ode>
+            <mu>0.05</mu>
+          </ode>
+        </friction>
+      </surface>
+    </collision>
+
+    <inertial>
+      <mass>10</mass>
+      <inertia>
+      	 <ixx>1</ixx>
+      	 <ixy>0</ixy>
+      	 <ixz>0</ixz>
+      	 <iyy>1</iyy>
+      	 <iyz>0</iyz>
+      	 <izz>1</izz>
+      </inertia>
+    </inertial>
+    <gravity>1</gravity>
+    </link>
+    <plugin name="forcePlugin" filename="libmultiForcePlugin.so" />
+</model>
+</sdf>

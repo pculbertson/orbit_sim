@@ -1,0 +1,17 @@
+<launch>
+  <!-- We resume the logic in empty_world.launch, changing only the name of the world to be launched -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <!-- Because the world path is relative to GAZEBO_RESOURCE_PATH, we append to it here. -->
+    <env name="GAZEBO_RESOURCE_PATH" value="$(env GAZEBO_RESOURCE_PATH):$(find orbit_sim)"/>
+    <arg name="verbose" value="true" />
+    <arg name="world_name" value="worlds/orbit.world"/>
+    <arg name="paused" value="false"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="gui" value="true"/>
+    <arg name="recording" value="true"/>
+    <arg name="debug" value="false"/>
+  </include>
+  <node name="spawn_sdf" pkg="gazebo_ros" type="spawn_model" args="-file $(find orbit_sim)/models/fullModel.sdf -sdf -z 1 -model payload" />
+  <node name="link_drop" pkg="topic_tools" type="drop" args="/gazebo/link_states 30 31 /gazebo/link_states_drop" />
+  <node name="reference" pkg="orbit_sim" type="refSignal" />
+</launch>

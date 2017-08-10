@@ -1,0 +1,41 @@
+<sdf version="1.4">
+<model name="payload">
+  <link name="body">
+    <visual name="payload_vis">
+      <geometry>
+        <box>
+          <size>1 1 1</size>
+        </box>
+      </geometry>
+    </visual>
+    <collision name="payload_col">
+      <geometry>
+      	<box>
+          <size>1 1 1</size>
+        </box>
+      </geometry>
+      <surface>
+        <friction>
+          <ode>
+            <mu>0.05</mu>
+          </ode>
+        </friction>
+      </surface>
+    </collision>
+
+    <inertial>
+      <mass>10</mass>
+      <inertia>
+      	 <ixx>1</ixx>
+      	 <ixy>0</ixy>
+      	 <ixz>0</ixz>
+      	 <iyy>1</iyy>
+      	 <iyz>0</iyz>
+      	 <izz>1</izz>
+      </inertia>
+    </inertial>
+    <gravity>1</gravity>
+    </link>
+    <plugin filename="libmultiForcePlugin.so" name="forcePlugin" />
+<link name="robot1"><pose> .5 0 0 0 1.28 0</pose><visual name="robot1-vis"><geometry><box><size>0.100000 0.100000 0.100000</size></box></geometry></visual><collision name="robot1-col"><geometry><box><size>0.100000 0.100000 0.100000</size></box></geometry></collision><gravity>0</gravity></link><joint name="robot1-joint" type="fixed"><parent>body</parent><child>robot1</child></joint></model>
+</sdf>
