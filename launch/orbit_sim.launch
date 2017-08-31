@@ -4,7 +4,7 @@
     
     <env name="GAZEBO_RESOURCE_PATH" value="$(env GAZEBO_RESOURCE_PATH):$(find orbit_sim)" />
     <arg name="verbose" value="true" />
-    <arg name="world_name" value="worlds/create.world" />
+    <arg name="world_name" value="worlds/orbit.world" />
     <arg name="paused" value="false" />
     <arg name="use_sim_time" value="true" />
     <arg name="gui" value="true" />
@@ -14,4 +14,4 @@
   <node args="-file $(find orbit_sim)/models/fullModel.sdf -sdf -z 1 -model payload" name="spawn_sdf" pkg="gazebo_ros" type="spawn_model" />
   <node args="/gazebo/link_states 30 31 /gazebo/link_states_drop" name="link_drop" pkg="topic_tools" type="drop" />
   <node name="reference" pkg="orbit_sim" type="refSignal" />
-</launch>
+<node args="0 /wrenchPlugin/wrenchCommands:=/wrenchPlugin/wrenchCommands0 controllerState:=controllerState0 modelState:=modelState0" name="robot1Ctrl" pkg="orbit_sim" type="controller" /><node args="1 /wrenchPlugin/wrenchCommands:=/wrenchPlugin/wrenchCommands1 controllerState:=controllerState1 modelState:=modelState1" name="robot2Ctrl" pkg="orbit_sim" type="controller" /><node args="2 /wrenchPlugin/wrenchCommands:=/wrenchPlugin/wrenchCommands2 controllerState:=controllerState2 modelState:=modelState2" name="robot3Ctrl" pkg="orbit_sim" type="controller" /><node args="3 /wrenchPlugin/wrenchCommands:=/wrenchPlugin/wrenchCommands3 controllerState:=controllerState3 modelState:=modelState3" name="robot4Ctrl" pkg="orbit_sim" type="controller" /><node args="4 /wrenchPlugin/wrenchCommands:=/wrenchPlugin/wrenchCommands4 controllerState:=controllerState4 modelState:=modelState4" name="robot5Ctrl" pkg="orbit_sim" type="controller" /><node args="5 /wrenchPlugin/wrenchCommands:=/wrenchPlugin/wrenchCommands5 controllerState:=controllerState5 modelState:=modelState5" name="robot6Ctrl" pkg="orbit_sim" type="controller" /></launch>

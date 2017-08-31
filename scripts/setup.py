@@ -18,7 +18,7 @@ model=sdfTree.find('model')
 launch = launchTree.getroot()
 
 cubeSatSize = .1
-linkNum = 1
+linkNum = 0
 
 config_file = open("%s/../config/config.txt"%filepath,"r")
 for line in config_file:
@@ -56,11 +56,11 @@ for line in config_file:
 	child = ET.SubElement(joint,'child')
 	child.text = currName
 
-	#node = ET.SubElement(launch,'node')
-	#node.set('name','%sCtrl'%currName)
-	#node.set('pkg','orbit_sim')
-	#node.set('type','2dctrl')
-	#node.set('args','%d /wrenchPlugin/wrenchCommands:=/wrenchPlugin/wrenchCommands%d controllerState:=controllerState%d modelState:=modelState%d'%(linkNum,linkNum,linkNum,linkNum))
+	node = ET.SubElement(launch,'node')
+	node.set('name','%sCtrl'%currName)
+	node.set('pkg','orbit_sim')
+	node.set('type','controller')
+	node.set('args','%d /wrenchPlugin/wrenchCommands:=/wrenchPlugin/wrenchCommands%d controllerState:=controllerState%d modelState:=modelState%d'%(linkNum,linkNum,linkNum,linkNum))
 
 	linkNum += 1
 

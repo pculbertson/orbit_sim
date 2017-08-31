@@ -13,6 +13,7 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   roscpp
   gazebo_ros
+  message_generation
 )
 
 ## System dependencies are found with CMake's conventions
@@ -52,6 +53,8 @@ find_package(catkin REQUIRED COMPONENTS
  add_message_files(
    FILES
    refSig.msg
+   refSig6.msg
+   state.msg
 #   Message2.msg
  )
 
@@ -106,7 +109,7 @@ find_package(catkin REQUIRED COMPONENTS
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-#  INCLUDE_DIRS include
+  #INCLUDE_DIRS include
 #  LIBRARIES orbit_sim
   CATKIN_DEPENDS rospy roscpp std_msgs geometry_msgs message_runtime	
   DEPENDS
@@ -121,7 +124,7 @@ catkin_package(
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 include_directories(
-# include
+ include
   ${catkin_INCLUDE_DIRS} ${Boost_INCLUDE_DIR} ${GAZEBO_INCLUDE_DIRS} ${roscpp_INCLUDE_DIRS}
 )
 
@@ -133,7 +136,7 @@ add_library(multiForcePlugin SHARED ./src/multiForcePlugin.cpp)
 ## Add cmake target dependencies of the library
 ## as an example, code may need to be generated before libraries
 ## either from message generation or dynamic reconfigure
-# add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+
 
 ## Declare a C++ executable
 ## With catkin_make all packages are built within a single CMake context
@@ -141,7 +144,12 @@ add_library(multiForcePlugin SHARED ./src/multiForcePlugin.cpp)
 # add_executable(${PROJECT_NAME}_node src/orbit_sim_node.cpp)
 
 add_executable(refSignal src/refSignal.cpp)
+add_executable(refSignal6 src/refSignal6.cpp)
+#add_dependencies(refSignal msg_pkg_generate_messages_cpp)
+add_dependencies(refSignal ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(refSignal6 ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 add_executable(controller src/controller.cpp)
+add_executable(6dofcontroller src/6dofControl.cpp)
 add_executable(2dctrl src/2dctrl.cpp)
 
 ## Rename C++ executable without prefix
@@ -160,7 +168,9 @@ add_executable(2dctrl src/2dctrl.cpp)
  target_link_libraries(multiForcePlugin ${GAZEBO_LIBRARIES} ${Boost_LIBRARIES} ${catkin_LIBRARIES} ${roscpp_LIBRARIES}
  )
  target_link_libraries(refSignal ${catkin_LIBRARIES} ${roscpp_LIBRARIES})
+  target_link_libraries(refSignal6 ${catkin_LIBRARIES} ${roscpp_LIBRARIES})
  target_link_libraries(controller ${catkin_LIBRARIES} ${roscpp_LIBRARIES})
+  target_link_libraries(6dofcontroller ${catkin_LIBRARIES} ${roscpp_LIBRARIES})
  target_link_libraries(2dctrl ${catkin_LIBRARIES} ${roscpp_LIBRARIES})
 #############
 ## Install ##

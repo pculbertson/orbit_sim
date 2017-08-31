@@ -70,7 +70,7 @@ class ForcePlugin : public ModelPlugin
   	//container for the wrench that each agent applies to the body
 	private: std::vector<geometry_msgs::Wrench> wrench_msgs;
 
-	private: std::vector<math::Vector3> offsets;
+	private: std::vector<gazebo::math::Vector3> offsets;
 
 	private: event::ConnectionPtr update_connection_;
 
@@ -126,7 +126,8 @@ void ForcePlugin::UpdateChild()
 		this->lock_.lock();
 		math::Vector3 force(this->wrench_msgs[i].force.x,this->wrench_msgs[i].force.y,this->wrench_msgs[i].force.z);
   		math::Vector3 torque(this->wrench_msgs[i].torque.x,this->wrench_msgs[i].torque.y,this->wrench_msgs[i].torque.z);
-  		this->link_->AddForceAtRelativePosition(force,offsets[i]);
+  		this->link_->AddForceAtRelativePosition(force,this->offsets[i]);
+  		//this->link_->AddRelativeForce(force);
   		this->link_->AddRelativeTorque(torque);
   		this->lock_.unlock();
 	}
@@ -171,7 +172,7 @@ void ForcePlugin::Load( physics::ModelPtr _parent, sdf::ElementPtr _sdf )
    		boost::bind( &ForcePlugin::commandCallback,this,_1,i),ros::VoidPtr(),NULL);
    		ROS_INFO("Subscriber options built");
    		this->subs.push_back(this->rosnode_->subscribe(so));
-   		offsets[i] = _model->GetLinks()[i+1].GetRelativePose().pos;
+   		this->offsets.push_back(_model->GetLinks()[i+1]->GetRelativePose().pos);
    		ROS_INFO("one robot built");
 	}
 

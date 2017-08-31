@@ -18,8 +18,8 @@ class Controller{
 	int robotNum;
 	double stateTime;
 	Vector3d x, xM, r;
-	Matrix3d Kx, Kr, gX, gR, gJ, Am, Bm, P;
-	MatrixXd J;
+	Matrix3d Kx, Kr, gamX, gamR, gamM, gamL, Am, Bm, P, wX, wR, wL, wM;
+	MatrixXd L, M;
 	ros::Publisher cmd_pub;
 	ros::Publisher state_pub;
 	ros::Publisher model_pub;
@@ -27,7 +27,8 @@ class Controller{
 		Controller(int, ros::NodeHandle);
 		void refCallback(const orbit_sim::refSig::ConstPtr& _msg);
 		void stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg);
-		VectorXd fOmega(Vector3d x);
+		VectorXd fX(Vector3d x);
+		VectorXd gX(Vector3d x);
 };
 
 Controller::Controller(int input, ros::NodeHandle n){
@@ -37,14 +38,18 @@ Controller::Controller(int input, ros::NodeHandle n){
 	this->x = Vector3d(0,0,0);
 	this->xM = Vector3d(0,0,0);
 	this->r = Vector3d(0,0,0);
-	this->Kx = .01*MatrixXd::Identity(3,3);
-	this->Kr = .01*MatrixXd::Identity(3,3);
-	this->L = 1e-4*MatrixXd::Identity(3,3);
-	this->M = 1e-4*MatrixXd::Ones(3,2);
-	this->gX = 1e4*MatrixXd::Identity(3,3);
-	this->gR = 1e4*MatrixXd::Identity(3,3);
-	this->gM = 1e0*MatrixXd::Identity(3,3);
-	this->gL = 1e0*MatrixXd::Identity(3,3);
+	this->Kx = 1e1*MatrixXd::Identity(3,3);
+	this->Kr = 1e1*MatrixXd::Identity(3,3);
+	this->L = 1e-10*MatrixXd::Identity(3,3);
+	this->M = 1e-10*MatrixXd::Ones(3,2);
+	this->gamX = 2e1*MatrixXd::Identity(3,3);
+	this->gamR = 2e1*MatrixXd::Identity(3,3);
+	this->gamM = 1e-2*MatrixXd::Identity(3,3);
+	this->gamL = 1e-2*MatrixXd::Identity(3,3);
+	this->wX = 1e-20*MatrixXd::Identity(3,3);
+	this->wR = 1e-20*MatrixXd::Identity(3,3);
+	this->wL = 1e-20*MatrixXd::Identity(3,3);
+	this->wM = 1e-20*MatrixXd::Identity(3,3);
 	this->Am = -0.01*MatrixXd::Identity(3,3);
 	this->Bm = MatrixXd::Identity(3,3);
 	this->P = 5*MatrixXd::Identity(3,3);
@@ -61,7 +66,7 @@ VectorXd Controller::fX(Vector3d x){
 
 VectorXd Controller::gX(Vector3d x){
 	VectorXd outVec(2);
-	outVec << x(1)*x(3), x(2)*x(3);
+	outVec << x(0)*x(2), x(1)*x(2);
 	return outVec;
 }
 
@@ -92,10 +97,10 @@ void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
 		Vector3d e = this->x - this->xM; //tracking error
 		double dt = currTime - this->stateTime;
 
-		this->Kx = this->Kx + dt*(-this->gX*this->Bm.transpose()*this->P*e*this->x.transpose());
-		this->Kr = this->Kr + dt*(-this->gR*this->Bm.transpose()*this->P*e*this->r.transpose());
-		this->L = this->L + dt*(-this->gL*this->Bm.transpose()*this->P*e*(this->fX(this->x)).transpose());
-		this->M = this->M + dt*(-this->gM*this->Bm.transpose()*this->P*e*(this->gX(this->x)).transpose());
+		this->Kx = this->Kx + dt*(-this->gamX*this->Bm.transpose()*this->P*e*this->x.transpose()-this->wX*this->Kx);
+		this->Kr = this->Kr + dt*(-this->gamR*this->Bm.transpose()*this->P*e*this->r.transpose()-this->wR*this->Kr);
+		this->L = this->L + dt*(-this->gamL*this->Bm.transpose()*this->P*e*(this->fX(this->x)).transpose()-this->wL*this->L);
+		this->M = this->M + dt*(-this->gamM*this->Bm.transpose()*this->P*e*(this->gX(this->x)).transpose()-this->wM*this->M);
 
 		Vector3d u = this->Kx*this->x + this->Kr*this->r + this->L*(this->fX(this->x))+ this->M*(this->gX(this->x)); //control vector in robot frame
 
