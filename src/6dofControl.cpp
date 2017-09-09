@@ -21,7 +21,7 @@ class Controller{
 	double stateTime;
 	double refTime;
 	Vector6d x, xM, r,xMFilt, rFilt;
-	Matrix6d Kx, Kr, gX, gR, gJ, gL, Am, Bm, P;
+	Matrix6d Kx, Kr, gX, gR, gJ, gL, Am, Bm, P, sX, sR, sJ, sL;
 	MatrixXd J;
 	MatrixXd L;
 	ros::Publisher cmd_pub;
@@ -45,13 +45,18 @@ Controller::Controller(int input, ros::NodeHandle n){
 	this->xMFilt << 0,0,0,0,0,0;
 	this->rFilt << 0,0,0,0,0,0;
 	this->r << 0,0,0,0,0,0;
-	this->Kx = 1e-6*MatrixXd::Identity(6,6);
-	this->Kr = 1e-6*MatrixXd::Identity(6,6);
-	this->J = 1e-6*MatrixXd::Ones(6,6);
-	this->L = 1e-6*MatrixXd::Ones(6,6);
-	this->gX = 1e1*MatrixXd::Identity(6,6);
-	this->gR = 1e0*MatrixXd::Identity(6,6);
-	this->gJ = 1e-1*MatrixXd::Identity(6,6);
+	this->Kx = 1e-15*MatrixXd::Identity(6,6);
+	this->Kr = 1e-15*MatrixXd::Identity(6,6);
+	this->J = 1e-15*MatrixXd::Ones(6,6);
+	this->L = 1e-15*MatrixXd::Ones(6,6);
+	this->gX = 1e3*MatrixXd::Identity(6,6);
+	this->gR = 1e3*MatrixXd::Identity(6,6);
+	this->gJ = 5e4*MatrixXd::Identity(6,6);
+	this->gL = 5e4*MatrixXd::Identity(6,6);
+	this->sX = 1e0*MatrixXd::Identity(6,6);
+	this->sR = 1e0*MatrixXd::Identity(6,6);
+	this->sJ = 5e0*MatrixXd::Identity(6,6);
+	this->sL = 5e0*MatrixXd::Identity(6,6);
 	this->Am = -0.01*MatrixXd::Identity(6,6);
 	this->Bm = MatrixXd::Identity(6,6);
 	this->P = 5*MatrixXd::Identity(6,6);
@@ -79,8 +84,8 @@ void Controller::refCallback(const orbit_sim::refSig6::ConstPtr& _msg){
 	} else {
 		this->xM << Vector6d::Map(_msg->xm.data(),6);
 		this->r << Vector6d::Map(_msg->r.data(),6);
-		this->xMFilt = .85*this->xM+ .15*this->xMFilt;
-		this->rFilt = .85*this->r + .15*this->rFilt;
+		this->xMFilt = .5*this->xM+ .5*this->xMFilt;
+		this->rFilt = .5*this->r + .5*this->rFilt;
 		this->refTime = ros::Time::now().toSec();
 	}
 	
@@ -100,17 +105,31 @@ void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
 		//express angular velocity in robot frame
 		Vector3d angVel = orientation.normalized().toRotationMatrix().transpose()*Vector3d(twist.angular.x,twist.angular.y,twist.angular.z);
 		Vector3d linVel = orientation.normalized().toRotationMatrix().transpose()*Vector3d(twist.linear.x,twist.linear.y,twist.linear.z);
-		this->x << linVel, angVel;
+		
+		Vector6d xCurr;
+		xCurr << linVel, angVel;
+		this->x = .2*xCurr + .8*this->x;
 		//update adaptive controller params
 		Vector6d e = this->x - this->xMFilt; //tracking error
 		double dt = currTime - this->stateTime;
 
-		this->Kx = this->Kx + dt*(-this->gX*this->Bm.transpose()*this->P*e*this->x.transpose()-5e-10*this->Kx);
-		this->Kr = this->Kr + dt*(-this->gR*this->Bm.transpose()*this->P*e*this->r.transpose()-5e-10*this->Kr);
-		this->J = this->J + dt*(-this->gJ*this->Bm.transpose()*this->P*e*(this->f(this->x)).transpose()-5e-10*this->J);
-		this->L = this->L + dt*(-this->gL*this->Bm.transpose()*this->P*e*(this->g(this->x)).transpose()-5e-10*this->L);
+		Vector6d eDead;
+		for(int i = 0; i < 6; i++){
+			if(std::abs(e(i))<0.001){
+				eDead(i) = 0.0;
+			} else {
+				eDead(i) = e(i);
+			}
+		}
 
-		Vector6d u = this->Kx*this->x + this->Kr*this->r + this->J*(this->f(this->x))+ this->L*(this->g(this->x)); //control vector in body frame
+		Vector6d u = this->Kx*this->x + this->Kr*this->rFilt + this->J*(this->f(this->x))+ this->L*(this->g(this->x)); //control vector in body frame
+
+
+		this->Kx = this->Kx + dt*(-this->gX*this->Bm.transpose()*this->P*eDead*this->x.transpose()-this->sX*this->Kx*e.norm());
+		this->Kr = this->Kr + dt*(-this->gR*this->Bm.transpose()*this->P*eDead*this->rFilt.transpose()-this->sR*this->Kr*e.norm());
+		this->J = this->J + dt*(-this->gJ*this->Bm.transpose()*this->P*eDead*(this->f(this->x)).transpose()-this->sJ*this->J*e.norm());
+		this->L = this->L + dt*(-this->gL*this->Bm.transpose()*this->P*eDead*(this->g(this->x)).transpose()-this->sL*this->L*e.norm());
+
 
 		//Quaterniond bodyOrientation = Quaterniond(_msg->pose[0].orientation.x,_msg->pose[0].orientation.y,_msg->pose[0].orientation.z,_msg->pose[0].orientation.w);
 
@@ -133,13 +152,13 @@ void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
 		cmdWrench.torque = torque;
 
 		std::vector<double> xmsg;
-		std::vector<double> rmsg;
+		std::vector<double> xm_msg;
 		for(int i = 0; i < 6; i++){
-			xmsg.push_back(x(i));
-			rmsg.push_back(r(i));
+			xmsg.push_back(this->x(i));
+			xm_msg.push_back(this->xMFilt(i));
 		}
 		state_msg.x = xmsg;
-		state_msg.r = rmsg;
+		state_msg.xm = xm_msg;
 
 		this->cmd_pub.publish(cmdWrench);
 		this->state_pub.publish(state_msg);

@@ -59,7 +59,8 @@ for line in config_file:
 	node = ET.SubElement(launch,'node')
 	node.set('name','%sCtrl'%currName)
 	node.set('pkg','orbit_sim')
-	node.set('type','controller')
+	node.set('type','6dofcontroller')
+	node.set('output','screen')
 	node.set('args','%d /wrenchPlugin/wrenchCommands:=/wrenchPlugin/wrenchCommands%d controllerState:=controllerState%d modelState:=modelState%d'%(linkNum,linkNum,linkNum,linkNum))
 
 	linkNum += 1
@@ -72,5 +73,5 @@ if len(sys.argv) > 1:
 
 
 sdfTree.write('%s/../models/fullModel.sdf'%filepath)
-launchTree.write('%s/../launch/orbit_sim.launch'%filepath)
+launchTree.write('%s/../launch/orbit_sim_6dof.launch'%filepath)
 	

@@ -33,7 +33,9 @@ RefSignal::RefSignal(){
 void RefSignal::update(){
 	double currTime = ros::Time::now().toSec();
 	//this->r = (distribution(generator)+.25*sin(currTime)+.25*sin(2*currTime)+.25*sin(3*currTime)+.25*sin(10*currTime)+.1*sin(50*currTime))*Vector3d(1,1,1);
-	this->r << -cos(currTime*0.5),-sin(currTime*0.5),0,sin(currTime),sin(currTime),sin(currTime);
+	Vector6d sigVec;
+	sigVec << 1.0,1.0,0.0,1.0,0.0,0.0;
+	this->r = .05*(.25*sin(currTime)+.25*sin(2*currTime)+.25*sin(3*currTime)+.25*sin(10*currTime))*sigVec;
 	this->xM = this->xM + (currTime-refTime)*(Am*this->xM + Bm*this->r);
 	this->refTime = currTime;
 }

@@ -19,10 +19,10 @@
       <mass>10</mass>
       <inertia>
       	 <ixx>40</ixx>
-      	 <ixy>5</ixy>
-      	 <ixz>5</ixz>
+      	 <ixy>0</ixy>
+      	 <ixz>0</ixz>
       	 <iyy>40</iyy>
-      	 <iyz>0.5</iyz>
+      	 <iyz>0.-</iyz>
       	 <izz>20</izz>
       </inertia>
     </inertial>

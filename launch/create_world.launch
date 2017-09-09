@@ -13,5 +13,5 @@
   </include>
   <node name="spawn_sdf" pkg="gazebo_ros" type="spawn_model" args="-file $(find orbit_sim)/models/fullModel.sdf -sdf -z 1 -model payload" />
   <node name="link_drop" pkg="topic_tools" type="drop" args="/gazebo/link_states 30 31 /gazebo/link_states_drop" />
-  <node name="reference" pkg="orbit_sim" type="refSignal" />
+  <node name="reference" pkg="orbit_sim" type="refSignal6" />
 </launch>
