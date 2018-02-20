@@ -1,5 +1,5 @@
-#include <Eigen/Dense>
-#include <Eigen/Eigen>
+#include <eigen3/Eigen/Dense>
+#include <eigen3/Eigen/Eigen>
 #include <math.h>
 #include "ros/ros.h"
 #include "geometry_msgs/Vector3.h"

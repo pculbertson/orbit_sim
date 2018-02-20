@@ -14,7 +14,10 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   gazebo_ros
   message_generation
+  cmake_modules
 )
+
+find_package(Eigen REQUIRED)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
