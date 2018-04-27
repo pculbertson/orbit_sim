@@ -12,6 +12,7 @@
 #include "geometry_msgs/Twist.h"
 #include "orbit_sim/state.h"
 #include "Ybody.h"
+#include "qDes.h"
 
 using namespace Eigen;
 typedef Matrix<double, 6, 6> Matrix6d;
@@ -19,135 +20,105 @@ typedef Matrix<double, 6, 1> Vector6d;
 
 class Controller{
 	int robotNum;
-	double stateTime;
-	double refTime;
-	Vector6d x, xM, r,xMFilt, rFilt;
-	Matrix6d Kx, Kr, gX, gR, gJ, gL, Am, Bm, P, sX, sR, sJ, sL;
-	MatrixXd J;
-	MatrixXd L;
+	double time;
+	VectorXd a;
+	Vector6d q, qd;
+	Matrix6d Kd, L, Gamma;
 	ros::Publisher cmd_pub;
 	ros::Publisher state_pub;
 	public:
 		Controller(int, ros::NodeHandle);
-		void refCallback(const orbit_sim::refSig6::ConstPtr& _msg);
 		void stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg);
-		Vector6d f(Vector6d x);
-		Vector6d g(Vector6d x);
 
 };
 
 Controller::Controller(int input, ros::NodeHandle n){
 	srand(input);
 	this->robotNum = input;
-	this->stateTime = 0;
-	this->refTime = 0;
-	this->x << 0,0,0,0,0,0;
-	this->xM << 0,0,0,0,0,0;
-	this->xMFilt << 0,0,0,0,0,0;
-	this->rFilt << 0,0,0,0,0,0;
-	this->r << 0,0,0,0,0,0;
-	this->Kx = 1e-15*MatrixXd::Identity(6,6);
-	this->Kr = 1e-15*MatrixXd::Identity(6,6);
-	this->J = 1e-15*MatrixXd::Ones(6,6);
-	this->L = 1e-15*MatrixXd::Ones(6,6);
-	this->gX = 1e3*MatrixXd::Identity(6,6);
-	this->gR = 1e3*MatrixXd::Identity(6,6);
-	this->gJ = 5e4*MatrixXd::Identity(6,6);
-	this->gL = 5e4*MatrixXd::Identity(6,6);
-	this->sX = 1e0*MatrixXd::Identity(6,6);
-	this->sR = 1e0*MatrixXd::Identity(6,6);
-	this->sJ = 5e0*MatrixXd::Identity(6,6);
-	this->sL = 5e0*MatrixXd::Identity(6,6);
-	this->Am = -0.01*MatrixXd::Identity(6,6);
-	this->Bm = MatrixXd::Identity(6,6);
-	this->P = 5*MatrixXd::Identity(6,6);
-	this->cmd_pub = n.advertise<geometry_msgs::Wrench>("wrenchPlugin/wrenchCommands",1000);
+	this->time = 0;
+	this->q = Vector6d::Zero();
+	this->qd = Vector6d::Zero();
+	this->a = VectorXd::Random(40);
+	this->Gamma = 10*Matrix6d::Identity();
+	this->Kd = 0.1*Matrix6d::Identity();
+	this->L = 1*Matrix6d::Identity();
+	this->cmd_pub = n.advertise<geometry_msgs::Wrench>("wrenchPlugin/wrenchCommands",1000); //remapped in launch file to correct topic
 	this->state_pub = n.advertise<orbit_sim::state>("controllerState",1000);
 };
 
-Vector6d Controller::f(Vector6d x){
-	Vector6d fO;
-	fO << pow(x(3),2),pow(x(4),2),pow(x(5),2),x(3)*x(4),x(3)*x(5),x(4)*x(5);
-	return fO;
-}
-
-Vector6d Controller::g(Vector6d x){
-	Vector6d gO;
-	gO << x(3)*x(1), x(3)*x(2), x(4)*x(0), x(4)*x(2), x(5)*x(0), x(5)*x(1);
-	return gO;
-}
-
-void Controller::refCallback(const orbit_sim::refSig6::ConstPtr& _msg){
-	if (refTime == 0){
-		this->xM << Vector6d::Map(_msg->xm.data(),6);
-		this->r << Vector6d::Map(_msg->r.data(),6);
-		this->refTime = ros::Time::now().toSec();
-	} else {
-		this->xM << Vector6d::Map(_msg->xm.data(),6);
-		this->r << Vector6d::Map(_msg->r.data(),6);
-		this->xMFilt = .5*this->xM+ .5*this->xMFilt;
-		this->rFilt = .5*this->r + .5*this->rFilt;
-		this->refTime = ros::Time::now().toSec();
-	}
-	
-}
-
 void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
-	if (this->stateTime==0){
+	if (this->time==0){
 		//do nothing, gazebo not running yet
-		this->stateTime = ros::Time::now().toSec();
+		this->time = ros::Time::now().toSec();
 	} else {
 		double currTime = ros::Time::now().toSec();
 		//extract state
-		geometry_msgs::Pose pose = _msg->pose[0];
-		geometry_msgs::Twist twist = _msg->twist[0];
+		geometry_msgs::Pose pose = _msg->pose[1]; //use measurements from first robot (body 1 in Gazebo)
+		geometry_msgs::Twist twist = _msg->twist[1];
 		//form quaternion for orientation
-		Quaterniond orientation = Quaterniond(pose.orientation.w,pose.orientation.x,pose.orientation.y,pose.orientation.z);
-		//express angular velocity in robot frame
-		Vector3d angVel = orientation.normalized().toRotationMatrix().transpose()*Vector3d(twist.angular.x,twist.angular.y,twist.angular.z);
-		Vector3d linVel = orientation.normalized().toRotationMatrix().transpose()*Vector3d(twist.linear.x,twist.linear.y,twist.linear.z);
-		
-		Vector6d xCurr;
-		xCurr << linVel, angVel;
-		this->x = .2*xCurr + .8*this->x;
+		Quaterniond sensorOrientation = Quaterniond(pose.orientation.w,pose.orientation.x,pose.orientation.y,pose.orientation.z);
+		//express angular velocity in body frame
+		Vector3d angVel = sensorOrientation.normalized().toRotationMatrix().transpose()*Vector3d(twist.angular.x,twist.angular.y,twist.angular.z);
+		Vector3d linVel = sensorOrientation.normalized().toRotationMatrix().transpose()*Vector3d(twist.linear.x,twist.linear.y,twist.linear.z);
+		//extract position + gibbs vector
+		Vector3d pos;
+		pos << pose.position.x, pose.position.y, pose.position.z;
+		Vector3d gibbs;
+		gibbs << pose.orientation.x/pose.orientation.w, pose.orientation.y/pose.orientation.w, pose.orientation.z/pose.orientation.w;
+		//pack q, qd
+		Vector6d qCurr;
+		qCurr << pos, gibbs;
+		Vector6d qdCurr;
+		qdCurr << linVel, angVel;
+		//get reference trajectory
+		Vector6d q_des, qd_des, qdd_des;
+		//NEED TO PUT THESE IN BODY FRAME!
+		//Also think about the rotation in gibbs vector components (not euler angles)
+		q_des = q_d(currTime);
+		qd_des = qd_d(currTime);
+		qdd_des = qdd_d(currTime);
+		//filter position/velocity
+		this->q = .2*qCurr + .8*this->q;
+		this->qd = 0.2*qdCurr + 0.8*this->qd;
 		//update adaptive controller params
-		Vector6d e = this->x - this->xMFilt; //tracking error
-		double dt = currTime - this->stateTime;
+		Vector6d q_t = this->q - q_des; //tracking error
+		Vector6d qd_t = this->qd - qd_des;
+		Vector6d s = qd_t + this->L*q_t;
+		double dt = currTime - this->time;
 
-		Vector6d eDead;
+		Vector6d sDead; //deadband error signal
 		for(int i = 0; i < 6; i++){
-			if(std::abs(e(i))<0.001){
-				eDead(i) = 0.0;
+			if(std::abs(s(i))<0.1){
+				sDead(i) = 0.0;
 			} else {
-				eDead(i) = e(i);
+				sDead(i) = s(i);
 			}
 		}
 
-		Vector6d u = this->Kx*this->x + this->Kr*this->rFilt + this->J*(this->f(this->x))+ this->L*(this->g(this->x)); //control vector in body frame
+		MatrixXd Y = Ybody(this->q,this->qd,qd_des,qdd_des);
 
+		Vector6d u = Y*this->a - this->Kd*s; //control vector in body frame
+		this->a = this->a - dt*(this->Gamma*Y.transpose()*s);
 
-		this->Kx = this->Kx + dt*(-this->gX*this->Bm.transpose()*this->P*eDead*this->x.transpose()-this->sX*this->Kx*e.norm());
-		this->Kr = this->Kr + dt*(-this->gR*this->Bm.transpose()*this->P*eDead*this->rFilt.transpose()-this->sR*this->Kr*e.norm());
-		this->J = this->J + dt*(-this->gJ*this->Bm.transpose()*this->P*eDead*(this->f(this->x)).transpose()-this->sJ*this->J*e.norm());
-		this->L = this->L + dt*(-this->gL*this->Bm.transpose()*this->P*eDead*(this->g(this->x)).transpose()-this->sL*this->L*e.norm());
+		//need to put force into body frame
+		Quaterniond bodyOrientation = Quaterniond(_msg->pose[0].orientation.w,_msg->pose[0].orientation.x,_msg->pose[0].orientation.y,_msg->pose[0].orientation.z);
+		Matrix3d sensorToBody = bodyOrientation.normalized().toRotationMatrix().transpose()*sensorOrientation.normalized.toRotationMatrix();
 
-
-		//Quaterniond bodyOrientation = Quaterniond(_msg->pose[0].orientation.x,_msg->pose[0].orientation.y,_msg->pose[0].orientation.z,_msg->pose[0].orientation.w);
-
-		//Vector3d uBody = bodyOrientation.toRotationMatrix()*orientation.toRotationMatrix().transpose()*u;
+		Vector3d fBody = sensorToBody*Vector3d(u(0),u(1),u(2));
+		Vector3d tBody = sensorToBody*Vector3d(u(3),u(4),u(5));
 
 		geometry_msgs::Wrench cmdWrench;
 		geometry_msgs::Vector3 force;
 		geometry_msgs::Vector3 torque;
 		orbit_sim::state state_msg;
 
-		force.x = u(0);
-		force.y = u(1);
-		force.z = u(2);
+		force.x = fBody(0);
+		force.y = fBody(1);
+		force.z = fBody(2);
 
-		torque.x = u(3);
-		torque.y = u(4);
-		torque.z = u(5);
+		torque.x = tBody(0);
+		torque.y = tBody(1);
+		torque.z = tBody(2);
 
 		cmdWrench.force = force;
 		cmdWrench.torque = torque;
@@ -155,15 +126,15 @@ void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
 		std::vector<double> xmsg;
 		std::vector<double> xm_msg;
 		for(int i = 0; i < 6; i++){
-			xmsg.push_back(this->x(i));
-			xm_msg.push_back(this->xMFilt(i));
+			xmsg.push_back(this->q(i));
+			xm_msg.push_back(this->q_d(i));
 		}
 		state_msg.x = xmsg;
 		state_msg.xm = xm_msg;
 
-		this->cmd_pub.publish(cmdWrench);
+		this->cmd_pub.publish(cmdWrench); //this should be in body frame
 		this->state_pub.publish(state_msg);
-		this->stateTime = currTime;
+		this->time = currTime;
 	}
 }
 
