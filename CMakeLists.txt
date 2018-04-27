@@ -154,6 +154,7 @@ add_dependencies(refSignal6 ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTE
 add_executable(controller src/controller.cpp)
 add_executable(6dofcontroller src/6dofControl.cpp)
 add_executable(2dctrl src/2dctrl.cpp)
+add_executable(6dofham src/6dof_ham.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -175,6 +176,7 @@ add_executable(2dctrl src/2dctrl.cpp)
  target_link_libraries(controller ${catkin_LIBRARIES} ${roscpp_LIBRARIES})
   target_link_libraries(6dofcontroller ${catkin_LIBRARIES} ${roscpp_LIBRARIES})
  target_link_libraries(2dctrl ${catkin_LIBRARIES} ${roscpp_LIBRARIES})
+ target_link_libraries(6dofham ${catkin_LIBRARIES} ${roscpp_LIBRARIES})
 #############
 ## Install ##
 #############
