@@ -40,9 +40,10 @@ Controller::Controller(int input, ros::NodeHandle n){
 	this->q = Vector6d::Zero();
 	this->qd = Vector6d::Zero();
 	this->a = 1e-12*VectorXd::Random(40);
-	this->Gamma = 3e4*Matrix<double,40,40>::Identity();
-	this->Kd = 5e0*Matrix6d::Identity();
-	this->L = 1e-1*Matrix6d::Identity();
+	//this->Gamma = 0*Matrix<double,40,40>::Identity();
+	this->Gamma = 1e-1*Matrix<double,40,40>::Identity();
+	this->Kd = 1e-1*Matrix6d::Identity();
+	this->L = 1e1*Matrix6d::Identity();
 	this->cmd_pub = n.advertise<geometry_msgs::Wrench>("wrenchPlugin/wrenchCommands",1000); //remapped in launch file to correct topic
 	this->state_pub = n.advertise<orbit_sim::state>("controllerState",1000);
 };
@@ -58,9 +59,16 @@ void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
 		geometry_msgs::Twist twist = _msg->twist[1];
 		//form quaternion for orientation
 		Quaterniond sensorOrientation = Quaterniond(pose.orientation.w,pose.orientation.x,pose.orientation.y,pose.orientation.z);
+
+		Quaterniond bodyOrientation = Quaterniond(_msg->pose[0].orientation.w,_msg->pose[0].orientation.x,_msg->pose[0].orientation.y,_msg->pose[0].orientation.z);
+		Matrix3d sensorToBody = (bodyOrientation.normalized().toRotationMatrix()).transpose()*sensorOrientation.normalized().toRotationMatrix();
 		//express angular velocity in body frame
-		Vector3d angVel = sensorOrientation.normalized().toRotationMatrix().transpose()*Vector3d(twist.angular.x,twist.angular.y,twist.angular.z);
-		Vector3d linVel = sensorOrientation.normalized().toRotationMatrix().transpose()*Vector3d(twist.linear.x,twist.linear.y,twist.linear.z);
+		//Vector3d angVel = sensorOrientation.normalized().toRotationMatrix().transpose()*Vector3d(twist.angular.x,twist.angular.y,twist.angular.z);
+		//Vector3d linVel = sensorOrientation.normalized().toRotationMatrix().transpose()*Vector3d(twist.linear.x,twist.linear.y,twist.linear.z);
+
+		Vector3d angVel = sensorToBody*Vector3d(twist.angular.x,twist.angular.y,twist.angular.z);
+		Vector3d linVel = sensorToBody*Vector3d(twist.linear.x,twist.linear.y,twist.linear.z); 
+
 		//extract position + gibbs vector
 		Vector3d pos;
 		pos << pose.position.x, pose.position.y, pose.position.z;
@@ -81,8 +89,8 @@ void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
 		//filter position/velocity
 
 		// THIS FILTER IS NAIEVE -- need to treat quaternions as rotations + mix in that space.
-		this->q =  .95*qCurr + 0.05*this->q;
-		this->qd = .95*qdCurr + 0.05*this->qd;
+		this->q =  1*qCurr + 0*this->q;
+		this->qd = 1*qdCurr + 0*this->qd;
 		//update adaptive controller params
 		Vector6d q_t = this->q - q_des; //tracking error
 		Vector6d qd_t = this->qd - qd_des;
@@ -91,7 +99,7 @@ void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
 
 		Vector6d sDead; //deadband error signal
 		for(int i = 0; i < 6; i++){
-			if(std::abs(s(i))<0.05){
+			if(std::abs(s(i))<0.001){
 				sDead(i) = 0.0;
 			} else {
 				sDead(i) = s(i);
@@ -103,13 +111,12 @@ void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
 
 		MatrixXd Y = Ybody(this->q,this->qd,qd_des,qdd_des);
 
-		Vector6d u = Y*this->a - this->Kd*s; //control vector in body frame
+		Vector6d u = Y*this->a - this->Kd*sDead; //control vector in body frame
 
-		this->a = this->a - dt*(this->Gamma*Y.transpose()*s);
+		this->a = this->a - dt*(this->Gamma*Y.transpose()*sDead);
 
 		//need to put force into body frame
-		Quaterniond bodyOrientation = Quaterniond(_msg->pose[0].orientation.w,_msg->pose[0].orientation.x,_msg->pose[0].orientation.y,_msg->pose[0].orientation.z);
-		Matrix3d sensorToBody = (bodyOrientation.normalized().toRotationMatrix()).transpose()*sensorOrientation.normalized().toRotationMatrix();
+		
 
 		Vector3d fBody = sensorToBody*Vector3d(u(0),u(1),u(2));
 		Vector3d tBody = sensorToBody*Vector3d(u(3),u(4),u(5));
@@ -152,23 +159,23 @@ void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
 }
 
 double f = 0.5;
-double r = 0.1;
+double r = 0.25;
 
 Vector6d q_d(double t){
 	Vector6d q_des;
-	q_des << r*cos(f*t), r*sqrt(2.0)*sin(f*t)/2.0, r*sqrt(2.0)*sin(f*t)/2.0, 0, 0, 0;
+	q_des << r*cos(f*t), r*sqrt(2.0)*sin(f*t)/2.0, r*sqrt(2.0)*sin(f*t)/2.0, 0.1, 0, 0;
 	return q_des;
 }
 
 Vector6d qd_d(double t){
 	Vector6d qd_des;
-	qd_des << -r*sin(f*t), r*sqrt(2.0)*cos(f*t)/2.0, r*sqrt(2.0)*cos(f*t)/2.0, 0, 0, 0;
+	qd_des << -f*r*sin(f*t), f*r*sqrt(2.0)*cos(f*t)/2.0, f*r*sqrt(2.0)*cos(f*t)/2.0, 0, 0, 0;
 	return qd_des;
 }
 
 Vector6d qdd_d(double t){
 	Vector6d qdd_des;
-	qdd_des << -r*cos(f*t), -r*sqrt(2.0)*sin(f*t)/2.0, -r*sqrt(2.0)*sin(f*t)/2.0, 0, 0, 0;
+	qdd_des << -f*f*r*cos(f*t), -f*f*r*sqrt(2.0)*sin(f*t)/2.0, -f*f*r*sqrt(2.0)*sin(f*t)/2.0, 0, 0, 0;
 	return qdd_des;
 }
 
