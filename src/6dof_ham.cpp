@@ -21,6 +21,7 @@ typedef Matrix<double, 6, 1> Vector6d;
 class Controller{
 	int robotNum;
 	double time;
+	double db;
 	VectorXd a;
 	Vector6d q, qd;
 	Matrix6d Kd, L;
@@ -41,9 +42,20 @@ Controller::Controller(int input, ros::NodeHandle n){
 	this->qd = Vector6d::Zero();
 	this->a = 1e-12*VectorXd::Random(40);
 	//this->Gamma = 0*Matrix<double,40,40>::Identity();
-	this->Gamma = 1e-1*Matrix<double,40,40>::Identity();
-	this->Kd = 1e-1*Matrix6d::Identity();
-	this->L = 1e1*Matrix6d::Identity();
+	double gW;
+	n.getParam("/gW",gW);
+	double kdW_l;
+	n.getParam("/kdW_l",kdW_l);
+	double kdW_a;
+	n.getParam("/kdW_a",kdW_a);
+	double lW;
+	n.getParam("/lW",lW);
+	n.getParam("/db",db);
+	this->Gamma = gW*Matrix<double,40,40>::Identity();
+	Vector6d KdVec;
+	KdVec << kdW_l*MatrixXd::Ones(3,1), kdW_a*MatrixXd::Ones(3,1);
+	this->Kd = KdVec.asDiagonal();
+	this->L = lW*Matrix6d::Identity();
 	this->cmd_pub = n.advertise<geometry_msgs::Wrench>("wrenchPlugin/wrenchCommands",1000); //remapped in launch file to correct topic
 	this->state_pub = n.advertise<orbit_sim::state>("controllerState",1000);
 };
@@ -61,13 +73,17 @@ void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
 		Quaterniond sensorOrientation = Quaterniond(pose.orientation.w,pose.orientation.x,pose.orientation.y,pose.orientation.z);
 
 		Quaterniond bodyOrientation = Quaterniond(_msg->pose[0].orientation.w,_msg->pose[0].orientation.x,_msg->pose[0].orientation.y,_msg->pose[0].orientation.z);
-		Matrix3d sensorToBody = (bodyOrientation.normalized().toRotationMatrix()).transpose()*sensorOrientation.normalized().toRotationMatrix();
+		Matrix3d worldToBody = bodyOrientation.normalized().toRotationMatrix();
+		//Matrix3d sensorToBody = (bodyOrientation.normalized().toRotationMatrix()).transpose()*sensorOrientation.normalized().toRotationMatrix();
 		//express angular velocity in body frame
 		//Vector3d angVel = sensorOrientation.normalized().toRotationMatrix().transpose()*Vector3d(twist.angular.x,twist.angular.y,twist.angular.z);
 		//Vector3d linVel = sensorOrientation.normalized().toRotationMatrix().transpose()*Vector3d(twist.linear.x,twist.linear.y,twist.linear.z);
 
-		Vector3d angVel = sensorToBody*Vector3d(twist.angular.x,twist.angular.y,twist.angular.z);
-		Vector3d linVel = sensorToBody*Vector3d(twist.linear.x,twist.linear.y,twist.linear.z); 
+		//Vector3d angVel = sensorToBody*Vector3d(twist.angular.x,twist.angular.y,twist.angular.z);
+		//Vector3d linVel = sensorToBody*Vector3d(twist.linear.x,twist.linear.y,twist.linear.z); 
+
+		Vector3d angVel = worldToBody*Vector3d(twist.angular.x,twist.angular.y,twist.angular.z);
+		Vector3d linVel = worldToBody*Vector3d(twist.linear.x,twist.linear.y,twist.linear.z); 
 
 		//extract position + gibbs vector
 		Vector3d pos;
@@ -83,9 +99,9 @@ void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
 		Vector6d q_des, qd_des, qdd_des;
 		//NEED TO PUT THESE IN BODY FRAME!
 		//Also think about the rotation in gibbs vector components (not euler angles)
-		q_des = q_d(currTime);
-		qd_des = qd_d(currTime);
-		qdd_des = qdd_d(currTime);
+		q_des = q_d(currTime,bodyOrientation);
+		qd_des = qd_d(currTime,bodyOrientation);
+		qdd_des = qdd_d(currTime,bodyOrientation);
 		//filter position/velocity
 
 		// THIS FILTER IS NAIEVE -- need to treat quaternions as rotations + mix in that space.
@@ -99,7 +115,7 @@ void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
 
 		Vector6d sDead; //deadband error signal
 		for(int i = 0; i < 6; i++){
-			if(std::abs(s(i))<0.001){
+			if(std::abs(q_t(i))<0.001){
 				sDead(i) = 0.0;
 			} else {
 				sDead(i) = s(i);
@@ -118,8 +134,10 @@ void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
 		//need to put force into body frame
 		
 
-		Vector3d fBody = sensorToBody*Vector3d(u(0),u(1),u(2));
-		Vector3d tBody = sensorToBody*Vector3d(u(3),u(4),u(5));
+		//Vector3d fBody = sensorToBody*Vector3d(u(0),u(1),u(2));
+		//Vector3d tBody = sensorToBody*Vector3d(u(3),u(4),u(5));
+		Vector3d fBody = Vector3d(u(0),u(1),u(2));
+		Vector3d tBody = Vector3d(u(3),u(4),u(5));
 
 		//Vector3d fBody;
 		//Vector3d tBody;
@@ -161,21 +179,33 @@ void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
 double f = 0.5;
 double r = 0.25;
 
-Vector6d q_d(double t){
+Vector6d q_d(double t,Quaterniond q){
+	Vector3d q_des_lin, q_des_ang;
+	q_des_lin << r*cos(f*t), r*sqrt(2.0)*sin(f*t)/2.0, r*sqrt(2.0)*sin(f*t)/2.0;
+	q_des_ang << 0.1*sin(f*t), 0, 0;
 	Vector6d q_des;
-	q_des << r*cos(f*t), r*sqrt(2.0)*sin(f*t)/2.0, r*sqrt(2.0)*sin(f*t)/2.0, 0.1, 0, 0;
+	Matrix3d worldToBody = q.normalized().toRotationMatrix();
+	q_des << worldToBody*q_des_lin, q_des_ang;
 	return q_des;
 }
 
-Vector6d qd_d(double t){
+Vector6d qd_d(double t, Quaterniond q){
 	Vector6d qd_des;
-	qd_des << -f*r*sin(f*t), f*r*sqrt(2.0)*cos(f*t)/2.0, f*r*sqrt(2.0)*cos(f*t)/2.0, 0, 0, 0;
+	Vector3d qd_des_lin, qd_des_ang;
+	qd_des_lin << -f*r*sin(f*t), f*r*sqrt(2.0)*cos(f*t)/2.0, f*r*sqrt(2.0)*cos(f*t)/2.0;
+	qd_des_ang << 0.1*f*cos(f*t), 0, 0;
+	Matrix3d worldToBody = q.normalized().toRotationMatrix();
+	qd_des << worldToBody*qd_des_lin, qd_des_ang;
 	return qd_des;
 }
 
-Vector6d qdd_d(double t){
+Vector6d qdd_d(double t, Quaterniond q){
 	Vector6d qdd_des;
-	qdd_des << -f*f*r*cos(f*t), -f*f*r*sqrt(2.0)*sin(f*t)/2.0, -f*f*r*sqrt(2.0)*sin(f*t)/2.0, 0, 0, 0;
+	Vector3d qdd_des_lin, qdd_des_ang;
+	qdd_des_lin << -f*f*r*cos(f*t), -f*f*r*sqrt(2.0)*sin(f*t)/2.0, -f*f*r*sqrt(2.0)*sin(f*t)/2.0;
+	qdd_des_ang << -0.1*f*f*sin(f*t), 0, 0;
+	Matrix3d worldToBody = q.normalized().toRotationMatrix();
+	qdd_des << worldToBody*qdd_des_lin, qdd_des_ang;
 	return qdd_des;
 }
 
