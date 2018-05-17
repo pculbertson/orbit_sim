@@ -11,6 +11,7 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   std_msgs
   geometry_msgs
+  nav_msgs
   roscpp
   gazebo_ros
   message_generation
@@ -79,6 +80,7 @@ find_package(Eigen REQUIRED)
  generate_messages(
    DEPENDENCIES
    geometry_msgs
+   nav_msgs
    std_msgs
  )
 
@@ -114,7 +116,7 @@ find_package(Eigen REQUIRED)
 catkin_package(
   #INCLUDE_DIRS include
 #  LIBRARIES orbit_sim
-  CATKIN_DEPENDS rospy roscpp std_msgs geometry_msgs message_runtime	
+  CATKIN_DEPENDS rospy roscpp std_msgs geometry_msgs nav_msgs message_runtime	
   DEPENDS
     roscpp
     gazebo_ros
@@ -155,6 +157,7 @@ add_executable(controller src/controller.cpp)
 add_executable(6dofcontroller src/6dofControl.cpp)
 add_executable(2dctrl src/2dctrl.cpp)
 add_executable(6dofham src/6dof_ham.cpp)
+add_executable(ham_const src/ham_const_sim.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -177,6 +180,7 @@ add_executable(6dofham src/6dof_ham.cpp)
   target_link_libraries(6dofcontroller ${catkin_LIBRARIES} ${roscpp_LIBRARIES})
  target_link_libraries(2dctrl ${catkin_LIBRARIES} ${roscpp_LIBRARIES})
  target_link_libraries(6dofham ${catkin_LIBRARIES} ${roscpp_LIBRARIES})
+ target_link_libraries(ham_const ${catkin_LIBRARIES} ${roscpp_LIBRARIES})
 #############
 ## Install ##
 #############

@@ -13,11 +13,11 @@
   
   </include>
 
-  <param name="/gW" type="double" value="1e1" />
-  <param name="/kdW_l" type="double" value=".5e0" />
+  <param name="/gW" type="double" value="1e-11" />
+  <param name="/kdW_l" type="double" value=".5e1" />
   <param name="/kdW_a" type="double" value=".3e1" />
   <param name="/lW" type="double" value="8e0" />
-  <param name="/db" type="double" value="0.01" />
+  <param name="/db" type="double" value="0.1"
   
   <node args="-file $(find orbit_sim)/models/fullModel.sdf -sdf -z 1 -model payload" name="spawn_sdf" pkg="gazebo_ros" type="spawn_model" />
   <node args="/gazebo/link_states 30 31 /gazebo/link_states_drop" name="link_drop" pkg="topic_tools" type="drop" />

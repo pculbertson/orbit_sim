@@ -1,0 +1,19 @@
+<robot name="simple_box">
+  <link name="my_box">
+    <inertial>
+      <origin xyz="2 0 0" />
+      <mass value="1.0" />
+      <inertia  ixx="1.0" ixy="0.0"  ixz="0.0"  iyy="100.0"  iyz="0.0"  izz="1.0" />
+    </inertial>
+    <visual name="ast_visual">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry name="ast_geom">
+        <mesh filename="file:///home/pculbert/Documents/catkin_ws/src/orbit_sim/models/iss.dae" scale="3 3 3">
+        </mesh>
+      </geometry>
+    </visual>  
+  </link>
+  <gazebo reference="my_box">
+    <gravity>0</gravity>
+  </gazebo>
+</robot>

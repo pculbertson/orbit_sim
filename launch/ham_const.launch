@@ -1,0 +1,35 @@
+<launch>
+  
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    
+    <env name="GAZEBO_RESOURCE_PATH" value="$(env GAZEBO_RESOURCE_PATH):$(find orbit_sim)" />
+    <arg name="verbose" value="true" />
+    <arg name="world_name" value="worlds/orbit.world" />
+    <arg name="paused" value="false" />
+    <arg name="use_sim_time" value="true" />
+    <arg name="gui" value="true" />
+    <arg name="recording" value="false" />
+    <arg name="debug" value="false" />
+  
+  </include>
+
+  <param name="/gW" type="double" value="1e1" />
+  <param name="/kdW_l" type="double" value="2e0" />
+  <param name="/kdW_a" type="double" value="1e1
+  " />
+  <param name="/lW" type="double" value="1e0" />
+  <param name="/db" type="double" value="0.1" />
+
+  <node args="-file $(find orbit_sim)/models/fullModel.sdf -sdf -z 1 -model payload" name="spawn_sdf" pkg="gazebo_ros" type="spawn_model" />
+  <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model" args="-file $(find orbit_sim)/models/box.urdf -urdf -x 2 -y -0.5 -model ast1" />
+  <node name="spawn_urdf2" pkg="gazebo_ros" type="spawn_model" args="-file $(find orbit_sim)/models/box.urdf -urdf -x 3 -z 1 -model ast2" />
+  <node name="spawn_urdf3" pkg="gazebo_ros" type="spawn_model" args="-file $(find orbit_sim)/models/iss.urdf -urdf -x 2.2 -y 3.5 -z 1.4 -model iss" />
+  <node args="/gazebo/link_states 30 31 /gazebo/link_states_drop" name="link_drop" pkg="topic_tools" type="drop" />
+  <node args="0 /wrenchPlugin/wrenchCommands:=/wrenchPlugin/wrenchCommands0 controllerState:=controllerState0 modelState:=modelState0" name="robot1Ctrl" output="screen" pkg="orbit_sim" type="ham_const" />
+   <node args="1 /wrenchPlugin/wrenchCommands:=/wrenchPlugin/wrenchCommands1 controllerState:=controllerState1 modelState:=modelState1" name="robot2Ctrl" output="screen" pkg="orbit_sim" type="ham_const" />
+    <node args="2 /wrenchPlugin/wrenchCommands:=/wrenchPlugin/wrenchCommands2 controllerState:=controllerState2 modelState:=modelState2" name="robot3Ctrl" output="screen" pkg="orbit_sim" type="ham_const" />
+     <node args="3 /wrenchPlugin/wrenchCommands:=/wrenchPlugin/wrenchCommands3 controllerState:=controllerState3 modelState:=modelState3" name="robot4Ctrl" output="screen" pkg="orbit_sim" type="ham_const" />
+      <node args="4 /wrenchPlugin/wrenchCommands:=/wrenchPlugin/wrenchCommands4 controllerState:=controllerState4 modelState:=modelState4" name="robot5Ctrl" output="screen" pkg="orbit_sim" type="ham_const" />
+       <node args="5 /wrenchPlugin/wrenchCommands:=/wrenchPlugin/wrenchCommands5 controllerState:=controllerState5 modelState:=modelState5" name="robot6Ctrl" output="screen" pkg="orbit_sim" type="ham_const" />
+  
+</launch>
