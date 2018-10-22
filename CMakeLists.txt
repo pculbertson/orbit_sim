@@ -158,6 +158,7 @@ add_executable(6dofcontroller src/6dofControl.cpp)
 add_executable(2dctrl src/2dctrl.cpp)
 add_executable(6dofham src/6dof_ham.cpp)
 add_executable(ham_const src/ham_const_sim.cpp)
+add_executable(ham_simple src/ham_simple.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -180,7 +181,8 @@ add_executable(ham_const src/ham_const_sim.cpp)
   target_link_libraries(6dofcontroller ${catkin_LIBRARIES} ${roscpp_LIBRARIES})
  target_link_libraries(2dctrl ${catkin_LIBRARIES} ${roscpp_LIBRARIES})
  target_link_libraries(6dofham ${catkin_LIBRARIES} ${roscpp_LIBRARIES})
- target_link_libraries(ham_const ${catkin_LIBRARIES} ${roscpp_LIBRARIES})
+ target_link_libraries(ham_const ${catkin_LIBRARIES} ${roscpp_LIBRARIES}) 
+  target_link_libraries(ham_simple ${catkin_LIBRARIES} ${roscpp_LIBRARIES})
 #############
 ## Install ##
 #############

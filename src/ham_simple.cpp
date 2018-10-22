@@ -15,8 +15,8 @@
 #include "geometry_msgs/Twist.h"
 #include "nav_msgs/Path.h"
 #include "orbit_sim/state.h"
-#include "Ybody.h"
-#include "qDes_const.h"
+#include "Y_simple.h"
+#include "qDes_simple.h"
 
 using namespace Eigen;
 typedef Matrix<double, 6, 6> Matrix6d;
@@ -124,15 +124,15 @@ void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
 
 		Vector6d eDead; //deadband error signal
 		for(int i = 0; i < 6; i++){
-			if(std::abs(q_t(i))<db){
+			if(std::abs(e)<db){
 				eDead(i) = 0.0;
 			} else {
-				eDead(i) = s(i);
+				eDead(i) = e(i);
 			}
 
 		}
 
-		MatrixXd Y = Y(sensorToWorld,this->qd,qd_r,qdd_r);
+		MatrixXd Y = Y(sensorToWorld,this->qd,qd_des,qdd_des);
 
 		Vector6d F = Y*this->a - this->Kd*eDead; //nominal control in world frame
 
@@ -206,13 +206,13 @@ Matrix3d cross(Vector3d w){
 	return x;
 }
 
-Vector6d qd_d(double t, Vector6d q_des){
+Vector6d qd_d(double t){
 	Vector6d qd_des;
 	qd_des << 0, 0, 0, 0.1, 0, 0;
 	return qd_des;
 }
 
-Vector6d qdd_d(double t, Vector6d q_des, Vector6d qd_des){
+Vector6d qdd_d(double t){
 	Vector6d qdd_des;
 	qdd_des << MatrixXd::Zero(6,1);
 	return qdd_des;
@@ -230,7 +230,7 @@ MatrixXd Y(Matrix3d R, Vector6d qd, Vector6d qd_d, Vector6d qdd_d){
 	return Yout;
 }
 
-Matrix6d Minv(Matrix3d R, VectorXd a){
+MatrixXd Minv(Matrix3d R, VectorXd a){
 	Vector3d ri;
 	ri << a[15], a[16], a[17];
 	Matrix6d Mout;
