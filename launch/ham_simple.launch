@@ -13,9 +13,9 @@
   
   </include>
 
-  <param name="/gW" type="double" value="1e0" />
-  <param name="/kdW_l" type="double" value="1e0" />
-  <param name="/kdW_a" type="double" value="1e1" />
+  <param name="/gW" type="double" value="0" />
+  <param name="/kdW_l" type="double" value="1e0"/>
+  <param name="/kdW_a" type="double" value="3e0" />
   <param name="/lW" type="double" value="1e0" />
   <param name="/db" type="double" value="0.01" />
 

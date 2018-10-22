@@ -15,8 +15,7 @@
 #include "geometry_msgs/Twist.h"
 #include "nav_msgs/Path.h"
 #include "orbit_sim/state.h"
-#include "Y_simple.h"
-#include "qDes_simple.h"
+#include "simple_sim.h"
 
 using namespace Eigen;
 typedef Matrix<double, 6, 6> Matrix6d;
@@ -30,7 +29,7 @@ class Controller{
 	VectorXd a;
 	Vector6d q, qd;
 	Matrix6d Kd, L;
-	Matrix<double,40,40> Gamma;
+	Matrix<double,19,19> Gamma;
 	ros::Publisher cmd_pub;
 	ros::Publisher state_pub;
 	ros::Publisher path_pub;
@@ -50,7 +49,7 @@ Controller::Controller(int input, ros::NodeHandle n){
 	this->time = 0;
 	this->q = Vector6d::Zero();
 	this->qd = Vector6d::Zero();
-	this->a = 1e-3*VectorXd::Random(18);
+	this->a = 1e-12*VectorXd::Random(19);
 	sensorNum = -1;
 	//this->Gamma = 0*Matrix<double,40,40>::Identity();
 	double gW;
@@ -62,7 +61,7 @@ Controller::Controller(int input, ros::NodeHandle n){
 	double lW;
 	n.getParam("/lW",lW);
 	n.getParam("/db",db);
-	this->Gamma = gW*Matrix<double,18,18>::Identity();
+	this->Gamma = gW*Matrix<double,19,19>::Identity();
 	Vector6d KdVec;
 	KdVec << kdW_l*MatrixXd::Ones(3,1), kdW_a*MatrixXd::Ones(3,1);
 	this->Kd = KdVec.asDiagonal();
@@ -99,7 +98,7 @@ void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
 		//form quaternion for orientation
 		Quaterniond sensorOrientation = Quaterniond(sPose.orientation.w,sPose.orientation.x,sPose.orientation.y,sPose.orientation.z);
 		sensorOrientation = sensorOrientation.normalized();
-		Matrix3d sensorToWorld = sensorOrientation.normalized().toRotationMatrix().transpose();
+		Matrix3d sensorToWorld = sensorOrientation.normalized().toRotationMatrix();
 
 		//get body orientation
 		Quaterniond bodyOrientation = Quaterniond(_msg->pose[bodyNum].orientation.w,_msg->pose[bodyNum].orientation.x,_msg->pose[bodyNum].orientation.y,_msg->pose[bodyNum].orientation.z);
@@ -117,14 +116,14 @@ void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
 		qdd_des = qdd_d(currTime);
 
 		//filter position/velocity
-		this->qd = 1*qdCurr + 0*this->qd;
+		this->qd = 0.8*qdCurr + 0.2*this->qd;
 		//update adaptive controller params
 		Vector6d e = this->qd - qd_des; //tracking error
 		double dt = currTime - this->time;
 
 		Vector6d eDead; //deadband error signal
 		for(int i = 0; i < 6; i++){
-			if(std::abs(e)<db){
+			if(std::abs(e(i))<db){
 				eDead(i) = 0.0;
 			} else {
 				eDead(i) = e(i);
@@ -132,21 +131,28 @@ void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
 
 		}
 
-		MatrixXd Y = Y(sensorToWorld,this->qd,qd_des,qdd_des);
+		//ROS_INFO("pre-Y");
 
-		Vector6d F = Y*this->a - this->Kd*eDead; //nominal control in world frame
+		MatrixXd Ycurr = Y(sensorToWorld,this->qd,qd_des,qdd_des);
+
+		//ROS_INFO("post-Y");
+
+		Vector6d F = Ycurr*this->a - this->Kd*e;	 //nominal control in world frame
 
 		Vector6d tau = Minv(sensorToWorld,this->a)*F; //shift by estimate of M (in world frame)
 
-		MatrixXd Z = Z(sensorToWorld,F);
+		//ROS_INFO("post M-inv");
 
-		this->a = this->a - dt*(this->Gamma*(Y+Z).transpose()*eDead); //
+		MatrixXd Zcurr = Z(sensorToWorld,F);
 
-		//need to put force into body frame
-		Vector3d fBody = worldToBody*Vector3d(u(0),u(1),u(2));
-		Vector3d tBody = worldToBody*Vector3d(u(3),u(4),u(5));
-		//Vector3d fBody = Vector3d(u(0),u(1),u(2));
-		//Vector3d tBody = Vector3d(u(3),u(4),u(5));
+		//ROS_INFO("post Z");
+
+		this->a = this->a - dt*(this->Gamma*(Ycurr+Zcurr).transpose()*eDead); //
+
+		//plugin takes force in world frame (?!)
+		Vector3d fBody = Vector3d(tau(0),tau(1),tau(2));
+		Vector3d tBody = sensorToWorld.transpose()*Vector3d(tau(3),tau(4),tau(5));
+		
 
 		//Vector3d fBody;
 		//Vector3d tBody;
@@ -173,8 +179,8 @@ void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
 		std::vector<double> xmsg;
 		std::vector<double> xm_msg;
 		for(int i = 0; i < 6; i++){
-			xmsg.push_back(this->q(i));
-			xm_msg.push_back(q_des(i));
+			xmsg.push_back(this->qd(i));
+			xm_msg.push_back(qd_des(i));
 		}
 		state_msg.x = xmsg;
 		state_msg.xm = xm_msg;
@@ -207,45 +213,51 @@ Matrix3d cross(Vector3d w){
 }
 
 Vector6d qd_d(double t){
+	double f = 5/(2*M_PI);
 	Vector6d qd_des;
-	qd_des << 0, 0, 0, 0.1, 0, 0;
+	//qd_des << 0, 0, 0, 0, 0.5*std::sin(f*t), 0;
+	qd_des << 0.5*std::sin(f*t), 0, 0, 0, 0.5*std::sin(f*t), 0;
 	return qd_des;
 }
 
 Vector6d qdd_d(double t){
+	double f = 5/(2*M_PI);
 	Vector6d qdd_des;
-	qdd_des << MatrixXd::Zero(6,1);
+	//qdd_des << MatrixXd::Zero(4,1), 0.5*f*std::cos(f*t), 0;
+	qdd_des << 0.5*f*std::cos(f*t), 0, 0, 0, 0.5*f*std::cos(f*t), 0;
 	return qdd_des;
 }
 
 MatrixXd Y(Matrix3d R, Vector6d qd, Vector6d qd_d, Vector6d qdd_d){
 	//takes in R (sensor to world), qd (linear and angular rates of sensor in N), qd_des & qdd_des (in N), returns regressor Y
-	MatrixXd Yout(6,18);
-	Yout << (R(1,0)*qdd_d[5] - R(2,0)*qdd_d[4] + qd_d[4]*(R(0,0)*qd[4] - R(1,0)*qd[3]) + qd_d[5]*(R(0,0)*qd[5] - R(2,0)*qd[3])), (R(1,1)*qdd_d[5] - R(2,1)*qdd_d[4] + qd_d[4]*(R(0,1)*qd[4] - R(1,1)*qd[3]) + qd_d[5]*(R(0,1)*qd[5] - R(2,1)*qd[3])), (R(1,2)*qdd_d[5] - R(2,2)*qdd_d[4] + qd_d[4]*(R(0,2)*qd[4] - R(1,2)*qd[3]) + qd_d[5]*(R(0,2)*qd[5] - R(2,2)*qd[3])), qdd_d[0], MatrixXd::Zero(1,14),
-			(R(2,0)*qdd_d[3] - R(0,0)*qdd_d[5] - qd_d[3]*(R(0,0)*qd[4] - R(1,0)*qd[3]) + qd_d[5]*(R(1,0)*qd[5] - R(2,0)*qd[4])), (R(2,1)*qdd_d[3] - R(0,1)*qdd_d[5] - qd_d[3]*(R(0,1)*qd[4] - R(1,1)*qd[3]) + qd_d[5]*(R(1,1)*qd[5] - R(2,1)*qd[4])), (R(2,2)*qdd_d[3] - R(0,2)*qdd_d[5] - qd_d[3]*(R(0,2)*qd[4] - R(1,2)*qd[3]) + qd_d[5]*(R(1,2)*qd[5] - R(2,2)*qd[4])), qdd_d[1], MatrixXd::Zero(1,14),
-			(R(0,0)*qdd_d[4] - R(1,0)*qdd_d[3] - qd_d[3]*(R(0,0)*qd[5] - R(2,0)*qd[3]) - qd_d[4]*(R(1,0)*qd[5] - R(2,0)*qd[4])), (R(0,1)*qdd_d[4] - R(1,1)*qdd_d[3] - qd_d[3]*(R(0,1)*qd[5] - R(2,1)*qd[3]) - qd_d[4]*(R(1,1)*qd[5] - R(2,1)*qd[4])), (R(0,2)*qdd_d[4] - R(1,2)*qdd_d[3] - qd_d[3]*(R(0,2)*qd[5] - R(2,2)*qd[3]) - qd_d[4]*(R(1,2)*qd[5] - R(2,2)*qd[4])), qdd_d[2], MatrixXd::Zero(1,14),
-			-(R(1,0)*qdd_d[2] - R(2,0)*qdd_d[1]), -(R(1,1)*qdd_d[2] - R(2,1)*qdd_d[1]), -(R(1,2)*qdd_d[2] - R(2,2)*qdd_d[1]), 0, (qdd_d[4]*(R(0,1)*R(1,1) + R(0,2)*R(1,2)) + qdd_d[5]*(R(0,1)*R(2,1) + R(0,2)*R(2,2)) + qdd_d[3]*(pow(R(0,1),2 + pow(R(0,2),2)) - qd_d[3]*(R(0,1)*(R(1,1)*qd[5] - R(2,1)*qd[4]) + R(0,2)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - qd_d[4]*(R(1,1)*(R(1,1)*qd[5] - R(2,1)*qd[4]) + R(1,2)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - qd_d[5]*(R(2,1)*(R(1,1)*qd[5] - R(2,1)*qd[4]) + R(2,2)*(R(1,2)*qd[5] - R(2,2)*qd[4]))), (qd_d[3]*(R(0,1)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(0,0)*(R(1,1)*qd[5] - R(2,1)*qd[4])) - qdd_d[5]*(R(0,0)*R(2,1) + R(0,1)*R(2,0)) - qdd_d[4]*(R(0,0)*R(1,1) + R(0,1)*R(1,0)) + qd_d[4]*(R(1,1)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(1,0)*(R(1,1)*qd[5] - R(2,1)*qd[4])) + qd_d[5]*(R(2,1)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(2,0)*(R(1,1)*qd[5] - R(2,1)*qd[4])) - 2*R(0,0)*R(0,1)*qdd_d[3]), (qd_d[3]*(R(0,2)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(0,0)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - qdd_d[5]*(R(0,0)*R(2,2) + R(0,2)*R(2,0)) - qdd_d[4]*(R(0,0)*R(1,2) + R(0,2)*R(1,0)) + qd_d[4]*(R(1,2)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(1,0)*(R(1,2)*qd[5] - R(2,2)*qd[4])) + qd_d[5]*(R(2,2)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(2,0)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - 2*R(0,0)*R(0,2)*qdd_d[3]), (qdd_d[4]*(R(0,0)*R(1,0) + R(0,2)*R(1,2)) + qdd_d[5]*(R(0,0)*R(2,0) + R(0,2)*R(2,2)) + qdd_d[3]*(pow(R(0,0),2) + pow(R(0,2),2)) - qd_d[3]*(R(0,0)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(0,2)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - qd_d[4]*(R(1,0)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(1,2)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - qd_d[5]*(R(2,0)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(2,2)*(R(1,2)*qd[5] - R(2,2)*qd[4]))), (qd_d[3]*(R(0,2)*(R(1,1)*qd[5] - R(2,1)*qd[4]) + R(0,1)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - qdd_d[5]*(R(0,1)*R(2,2) + R(0,2)*R(2,1)) - qdd_d[4]*(R(0,1)*R(1,2) + R(0,2)*R(1,1)) + qd_d[4]*(R(1,2)*(R(1,1)*qd[5] - R(2,1)*qd[4]) + R(1,1)*(R(1,2)*qd[5] - R(2,2)*qd[4])) + qd_d[5]*(R(2,2)*(R(1,1)*qd[5] - R(2,1)*qd[4]) + R(2,1)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - 2*R(0,1)*R(0,2)*qdd_d[3]), (qdd_d[4]*(R(0,0)*R(1,0) + R(0,1)*R(1,1)) + qdd_d[5]*(R(0,0)*R(2,0) + R(0,1)*R(2,1)) + qdd_d[3]*(pow(R(0,0),2) + pow(R(0,1),2)) - qd_d[3]*(R(0,0)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(0,1)*(R(1,1)*qd[5] - R(2,1)*qd[4])) - qd_d[4]*(R(1,0)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(1,1)*(R(1,1)*qd[5] - R(2,1)*qd[4])) - qd_d[5]*(R(2,0)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(2,1)*(R(1,1)*qd[5] - R(2,1)*qd[4]))), (qdd_d[4]*(R(0,0)*R(1,1) + R(0,1)*R(1,0)) + qdd_d[5]*(R(0,0)*R(2,1) + R(0,1)*R(2,0)) - qd_d[3]*(R(0,1)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(0,0)*(R(1,1)*qd[5] - R(2,1)*qd[4])) - qd_d[4]*(R(1,1)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(1,0)*(R(1,1)*qd[5] - R(2,1)*qd[4])) - qd_d[5]*(R(2,1)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(2,0)*(R(1,1)*qd[5] - R(2,1)*qd[4])) + 2*R(0,0)*R(0,1)*qdd_d[3]), (qdd_d[4]*(R(0,0)*R(1,2) + R(0,2)*R(1,0)) + qdd_d[5]*(R(0,0)*R(2,2) + R(0,2)*R(2,0)) - qd_d[3]*(R(0,2)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(0,0)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - qd_d[4]*(R(1,2)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(1,0)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - qd_d[5]*(R(2,2)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(2,0)*(R(1,2)*qd[5] - R(2,2)*qd[4])) + 2*R(0,0)*R(0,2)*qdd_d[3]), (qdd_d[4]*(R(0,1)*R(1,2) + R(0,2)*R(1,1)) + qdd_d[5]*(R(0,1)*R(2,2) + R(0,2)*R(2,1)) - qd_d[3]*(R(0,2)*(R(1,1)*qd[5] - R(2,1)*qd[4]) + R(0,1)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - qd_d[4]*(R(1,2)*(R(1,1)*qd[5] - R(2,1)*qd[4]) + R(1,1)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - qd_d[5]*(R(2,2)*(R(1,1)*qd[5] - R(2,1)*qd[4]) + R(2,1)*(R(1,2)*qd[5] - R(2,2)*qd[4])) + 2*R(0,1)*R(0,2)*qdd_d[3]), (pow(R(0,0),2)*qdd_d[3] + R(0,0)*R(1,0)*qdd_d[4] + R(0,0)*R(2,0)*qdd_d[5] - R(0,0)*qd_d[3]*(R(1,0)*qd[5] - R(2,0)*qd[4]) - R(1,0)*qd_d[4]*(R(1,0)*qd[5] - R(2,0)*qd[4]) - R(2,0)*qd_d[5]*(R(1,0)*qd[5] - R(2,0)*qd[4])), (pow(R(0,1),2)*qdd_d[3] + R(0,1)*R(1,1)*qdd_d[4] + R(0,1)*R(2,1)*qdd_d[5] - R(0,1)*qd_d[3]*(R(1,1)*qd[5] - R(2,1)*qd[4]) - R(1,1)*qd_d[4]*(R(1,1)*qd[5] - R(2,1)*qd[4]) - R(2,1)*qd_d[5]*(R(1,1)*qd[5] - R(2,1)*qd[4])), (pow(R(0,2),2)*qdd_d[3] + R(0,2)*R(1,2)*qdd_d[4] + R(0,2)*R(2,2)*qdd_d[5] - R(0,2)*qd_d[3]*(R(1,2)*qd[5] - R(2,2)*qd[4]) - R(1,2)*qd_d[4]*(R(1,2)*qd[5] - R(2,2)*qd[4]) - R(2,2)*qd_d[5]*(R(1,2)*qd[5] - R(2,2)*qd[4])), MatrixXd::Zero(1,3),
+	MatrixXd Yout(6,19);
+	Yout << (R(1,0)*qdd_d[5] - R(2,0)*qdd_d[4] + qd_d[4]*(R(0,0)*qd[4] - R(1,0)*qd[3]) + qd_d[5]*(R(0,0)*qd[5] - R(2,0)*qd[3])), (R(1,1)*qdd_d[5] - R(2,1)*qdd_d[4] + qd_d[4]*(R(0,1)*qd[4] - R(1,1)*qd[3]) + qd_d[5]*(R(0,1)*qd[5] - R(2,1)*qd[3])), (R(1,2)*qdd_d[5] - R(2,2)*qdd_d[4] + qd_d[4]*(R(0,2)*qd[4] - R(1,2)*qd[3]) + qd_d[5]*(R(0,2)*qd[5] - R(2,2)*qd[3])), qdd_d[0], MatrixXd::Zero(1,15),
+			(R(2,0)*qdd_d[3] - R(0,0)*qdd_d[5] - qd_d[3]*(R(0,0)*qd[4] - R(1,0)*qd[3]) + qd_d[5]*(R(1,0)*qd[5] - R(2,0)*qd[4])), (R(2,1)*qdd_d[3] - R(0,1)*qdd_d[5] - qd_d[3]*(R(0,1)*qd[4] - R(1,1)*qd[3]) + qd_d[5]*(R(1,1)*qd[5] - R(2,1)*qd[4])), (R(2,2)*qdd_d[3] - R(0,2)*qdd_d[5] - qd_d[3]*(R(0,2)*qd[4] - R(1,2)*qd[3]) + qd_d[5]*(R(1,2)*qd[5] - R(2,2)*qd[4])), qdd_d[1], MatrixXd::Zero(1,15),
+			(R(0,0)*qdd_d[4] - R(1,0)*qdd_d[3] - qd_d[3]*(R(0,0)*qd[5] - R(2,0)*qd[3]) - qd_d[4]*(R(1,0)*qd[5] - R(2,0)*qd[4])), (R(0,1)*qdd_d[4] - R(1,1)*qdd_d[3] - qd_d[3]*(R(0,1)*qd[5] - R(2,1)*qd[3]) - qd_d[4]*(R(1,1)*qd[5] - R(2,1)*qd[4])), (R(0,2)*qdd_d[4] - R(1,2)*qdd_d[3] - qd_d[3]*(R(0,2)*qd[5] - R(2,2)*qd[3]) - qd_d[4]*(R(1,2)*qd[5] - R(2,2)*qd[4])), qdd_d[2], MatrixXd::Zero(1,15),
+			-(R(1,0)*qdd_d[2] - R(2,0)*qdd_d[1]), -(R(1,1)*qdd_d[2] - R(2,1)*qdd_d[1]), -(R(1,2)*qdd_d[2] - R(2,2)*qdd_d[1]), 0, (qdd_d[4]*(R(0,1)*R(1,1) + R(0,2)*R(1,2)) + qdd_d[5]*(R(0,1)*R(2,1) + R(0,2)*R(2,2)) + qdd_d[3]*(pow(R(0,1),2) + pow(R(0,2),2)) - qd_d[3]*(R(0,1)*(R(1,1)*qd[5] - R(2,1)*qd[4]) + R(0,2)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - qd_d[4]*(R(1,1)*(R(1,1)*qd[5] - R(2,1)*qd[4]) + R(1,2)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - qd_d[5]*(R(2,1)*(R(1,1)*qd[5] - R(2,1)*qd[4]) + R(2,2)*(R(1,2)*qd[5] - R(2,2)*qd[4]))), (qd_d[3]*(R(0,1)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(0,0)*(R(1,1)*qd[5] - R(2,1)*qd[4])) - qdd_d[5]*(R(0,0)*R(2,1) + R(0,1)*R(2,0)) - qdd_d[4]*(R(0,0)*R(1,1) + R(0,1)*R(1,0)) + qd_d[4]*(R(1,1)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(1,0)*(R(1,1)*qd[5] - R(2,1)*qd[4])) + qd_d[5]*(R(2,1)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(2,0)*(R(1,1)*qd[5] - R(2,1)*qd[4])) - 2*R(0,0)*R(0,1)*qdd_d[3]), (qd_d[3]*(R(0,2)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(0,0)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - qdd_d[5]*(R(0,0)*R(2,2) + R(0,2)*R(2,0)) - qdd_d[4]*(R(0,0)*R(1,2) + R(0,2)*R(1,0)) + qd_d[4]*(R(1,2)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(1,0)*(R(1,2)*qd[5] - R(2,2)*qd[4])) + qd_d[5]*(R(2,2)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(2,0)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - 2*R(0,0)*R(0,2)*qdd_d[3]), (qdd_d[4]*(R(0,0)*R(1,0) + R(0,2)*R(1,2)) + qdd_d[5]*(R(0,0)*R(2,0) + R(0,2)*R(2,2)) + qdd_d[3]*(pow(R(0,0),2) + pow(R(0,2),2)) - qd_d[3]*(R(0,0)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(0,2)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - qd_d[4]*(R(1,0)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(1,2)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - qd_d[5]*(R(2,0)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(2,2)*(R(1,2)*qd[5] - R(2,2)*qd[4]))), (qd_d[3]*(R(0,2)*(R(1,1)*qd[5] - R(2,1)*qd[4]) + R(0,1)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - qdd_d[5]*(R(0,1)*R(2,2) + R(0,2)*R(2,1)) - qdd_d[4]*(R(0,1)*R(1,2) + R(0,2)*R(1,1)) + qd_d[4]*(R(1,2)*(R(1,1)*qd[5] - R(2,1)*qd[4]) + R(1,1)*(R(1,2)*qd[5] - R(2,2)*qd[4])) + qd_d[5]*(R(2,2)*(R(1,1)*qd[5] - R(2,1)*qd[4]) + R(2,1)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - 2*R(0,1)*R(0,2)*qdd_d[3]), (qdd_d[4]*(R(0,0)*R(1,0) + R(0,1)*R(1,1)) + qdd_d[5]*(R(0,0)*R(2,0) + R(0,1)*R(2,1)) + qdd_d[3]*(pow(R(0,0),2) + pow(R(0,1),2)) - qd_d[3]*(R(0,0)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(0,1)*(R(1,1)*qd[5] - R(2,1)*qd[4])) - qd_d[4]*(R(1,0)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(1,1)*(R(1,1)*qd[5] - R(2,1)*qd[4])) - qd_d[5]*(R(2,0)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(2,1)*(R(1,1)*qd[5] - R(2,1)*qd[4]))), (qdd_d[4]*(R(0,0)*R(1,1) + R(0,1)*R(1,0)) + qdd_d[5]*(R(0,0)*R(2,1) + R(0,1)*R(2,0)) - qd_d[3]*(R(0,1)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(0,0)*(R(1,1)*qd[5] - R(2,1)*qd[4])) - qd_d[4]*(R(1,1)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(1,0)*(R(1,1)*qd[5] - R(2,1)*qd[4])) - qd_d[5]*(R(2,1)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(2,0)*(R(1,1)*qd[5] - R(2,1)*qd[4])) + 2*R(0,0)*R(0,1)*qdd_d[3]), (qdd_d[4]*(R(0,0)*R(1,2) + R(0,2)*R(1,0)) + qdd_d[5]*(R(0,0)*R(2,2) + R(0,2)*R(2,0)) - qd_d[3]*(R(0,2)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(0,0)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - qd_d[4]*(R(1,2)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(1,0)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - qd_d[5]*(R(2,2)*(R(1,0)*qd[5] - R(2,0)*qd[4]) + R(2,0)*(R(1,2)*qd[5] - R(2,2)*qd[4])) + 2*R(0,0)*R(0,2)*qdd_d[3]), (qdd_d[4]*(R(0,1)*R(1,2) + R(0,2)*R(1,1)) + qdd_d[5]*(R(0,1)*R(2,2) + R(0,2)*R(2,1)) - qd_d[3]*(R(0,2)*(R(1,1)*qd[5] - R(2,1)*qd[4]) + R(0,1)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - qd_d[4]*(R(1,2)*(R(1,1)*qd[5] - R(2,1)*qd[4]) + R(1,1)*(R(1,2)*qd[5] - R(2,2)*qd[4])) - qd_d[5]*(R(2,2)*(R(1,1)*qd[5] - R(2,1)*qd[4]) + R(2,1)*(R(1,2)*qd[5] - R(2,2)*qd[4])) + 2*R(0,1)*R(0,2)*qdd_d[3]), (pow(R(0,0),2)*qdd_d[3] + R(0,0)*R(1,0)*qdd_d[4] + R(0,0)*R(2,0)*qdd_d[5] - R(0,0)*qd_d[3]*(R(1,0)*qd[5] - R(2,0)*qd[4]) - R(1,0)*qd_d[4]*(R(1,0)*qd[5] - R(2,0)*qd[4]) - R(2,0)*qd_d[5]*(R(1,0)*qd[5] - R(2,0)*qd[4])), (pow(R(0,1),2)*qdd_d[3] + R(0,1)*R(1,1)*qdd_d[4] + R(0,1)*R(2,1)*qdd_d[5] - R(0,1)*qd_d[3]*(R(1,1)*qd[5] - R(2,1)*qd[4]) - R(1,1)*qd_d[4]*(R(1,1)*qd[5] - R(2,1)*qd[4]) - R(2,1)*qd_d[5]*(R(1,1)*qd[5] - R(2,1)*qd[4])), (pow(R(0,2),2)*qdd_d[3] + R(0,2)*R(1,2)*qdd_d[4] + R(0,2)*R(2,2)*qdd_d[5] - R(0,2)*qd_d[3]*(R(1,2)*qd[5] - R(2,2)*qd[4]) - R(1,2)*qd_d[4]*(R(1,2)*qd[5] - R(2,2)*qd[4]) - R(2,2)*qd_d[5]*(R(1,2)*qd[5] - R(2,2)*qd[4])), MatrixXd::Zero(1,3),
 			(R(0,0)*qdd_d[2] - R(2,0)*qdd_d[0]), (R(0,1)*qdd_d[2] - R(2,1)*qdd_d[0]), (R(0,2)*qdd_d[2] - R(2,2)*qdd_d[0]), 0, (qdd_d[3]*(R(0,1)*R(1,1) + R(0,2)*R(1,2)) + qdd_d[5]*(R(1,1)*R(2,1) + R(1,2)*R(2,2)) + qdd_d[4]*(pow(R(1,1),2) + pow(R(1,2),2)) + qd_d[3]*(R(0,1)*(R(0,1)*qd[5] - R(2,1)*qd[3]) + R(0,2)*(R(0,2)*qd[5] - R(2,2)*qd[3])) + qd_d[4]*(R(1,1)*(R(0,1)*qd[5] - R(2,1)*qd[3]) + R(1,2)*(R(0,2)*qd[5] - R(2,2)*qd[3])) + qd_d[5]*(R(2,1)*(R(0,1)*qd[5] - R(2,1)*qd[3]) + R(2,2)*(R(0,2)*qd[5] - R(2,2)*qd[3]))), (- qdd_d[3]*(R(0,0)*R(1,1) + R(0,1)*R(1,0)) - qdd_d[5]*(R(1,0)*R(2,1) + R(1,1)*R(2,0)) - qd_d[3]*(R(0,1)*(R(0,0)*qd[5] - R(2,0)*qd[3]) + R(0,0)*(R(0,1)*qd[5] - R(2,1)*qd[3])) - qd_d[4]*(R(1,1)*(R(0,0)*qd[5] - R(2,0)*qd[3]) + R(1,0)*(R(0,1)*qd[5] - R(2,1)*qd[3])) - qd_d[5]*(R(2,1)*(R(0,0)*qd[5] - R(2,0)*qd[3]) + R(2,0)*(R(0,1)*qd[5] - R(2,1)*qd[3])) - 2*R(1,0)*R(1,1)*qdd_d[4]), (- qdd_d[3]*(R(0,0)*R(1,2) + R(0,2)*R(1,0)) - qdd_d[5]*(R(1,0)*R(2,2) + R(1,2)*R(2,0)) - qd_d[3]*(R(0,2)*(R(0,0)*qd[5] - R(2,0)*qd[3]) + R(0,0)*(R(0,2)*qd[5] - R(2,2)*qd[3])) - qd_d[4]*(R(1,2)*(R(0,0)*qd[5] - R(2,0)*qd[3]) + R(1,0)*(R(0,2)*qd[5] - R(2,2)*qd[3])) - qd_d[5]*(R(2,2)*(R(0,0)*qd[5] - R(2,0)*qd[3]) + R(2,0)*(R(0,2)*qd[5] - R(2,2)*qd[3])) - 2*R(1,0)*R(1,2)*qdd_d[4]), (qdd_d[3]*(R(0,0)*R(1,0) + R(0,2)*R(1,2)) + qdd_d[5]*(R(1,0)*R(2,0) + R(1,2)*R(2,2)) + qdd_d[4]*(pow(R(1,0),2) + pow(R(1,2),2)) + qd_d[3]*(R(0,0)*(R(0,0)*qd[5] - R(2,0)*qd[3]) + R(0,2)*(R(0,2)*qd[5] - R(2,2)*qd[3])) + qd_d[4]*(R(1,0)*(R(0,0)*qd[5] - R(2,0)*qd[3]) + R(1,2)*(R(0,2)*qd[5] - R(2,2)*qd[3])) + qd_d[5]*(R(2,0)*(R(0,0)*qd[5] - R(2,0)*qd[3]) + R(2,2)*(R(0,2)*qd[5] - R(2,2)*qd[3]))), (- qdd_d[3]*(R(0,1)*R(1,2) + R(0,2)*R(1,1)) - qdd_d[5]*(R(1,1)*R(2,2) + R(1,2)*R(2,1)) - qd_d[3]*(R(0,2)*(R(0,1)*qd[5] - R(2,1)*qd[3]) + R(0,1)*(R(0,2)*qd[5] - R(2,2)*qd[3])) - qd_d[4]*(R(1,2)*(R(0,1)*qd[5] - R(2,1)*qd[3]) + R(1,1)*(R(0,2)*qd[5] - R(2,2)*qd[3])) - qd_d[5]*(R(2,2)*(R(0,1)*qd[5] - R(2,1)*qd[3]) + R(2,1)*(R(0,2)*qd[5] - R(2,2)*qd[3])) - 2*R(1,1)*R(1,2)*qdd_d[4]), (qdd_d[3]*(R(0,0)*R(1,0) + R(0,1)*R(1,1)) + qdd_d[5]*(R(1,0)*R(2,0) + R(1,1)*R(2,1)) + qdd_d[4]*(pow(R(1,0),2) + pow(R(1,1),2)) + qd_d[3]*(R(0,0)*(R(0,0)*qd[5] - R(2,0)*qd[3]) + R(0,1)*(R(0,1)*qd[5] - R(2,1)*qd[3])) + qd_d[4]*(R(1,0)*(R(0,0)*qd[5] - R(2,0)*qd[3]) + R(1,1)*(R(0,1)*qd[5] - R(2,1)*qd[3])) + qd_d[5]*(R(2,0)*(R(0,0)*qd[5] - R(2,0)*qd[3]) + R(2,1)*(R(0,1)*qd[5] - R(2,1)*qd[3]))), (qdd_d[3]*(R(0,0)*R(1,1) + R(0,1)*R(1,0)) + qdd_d[5]*(R(1,0)*R(2,1) + R(1,1)*R(2,0)) + qd_d[3]*(R(0,1)*(R(0,0)*qd[5] - R(2,0)*qd[3]) + R(0,0)*(R(0,1)*qd[5] - R(2,1)*qd[3])) + qd_d[4]*(R(1,1)*(R(0,0)*qd[5] - R(2,0)*qd[3]) + R(1,0)*(R(0,1)*qd[5] - R(2,1)*qd[3])) + qd_d[5]*(R(2,1)*(R(0,0)*qd[5] - R(2,0)*qd[3]) + R(2,0)*(R(0,1)*qd[5] - R(2,1)*qd[3])) + 2*R(1,0)*R(1,1)*qdd_d[4]), (qdd_d[3]*(R(0,0)*R(1,2) + R(0,2)*R(1,0)) + qdd_d[5]*(R(1,0)*R(2,2) + R(1,2)*R(2,0)) + qd_d[3]*(R(0,2)*(R(0,0)*qd[5] - R(2,0)*qd[3]) + R(0,0)*(R(0,2)*qd[5] - R(2,2)*qd[3])) + qd_d[4]*(R(1,2)*(R(0,0)*qd[5] - R(2,0)*qd[3]) + R(1,0)*(R(0,2)*qd[5] - R(2,2)*qd[3])) + qd_d[5]*(R(2,2)*(R(0,0)*qd[5] - R(2,0)*qd[3]) + R(2,0)*(R(0,2)*qd[5] - R(2,2)*qd[3])) + 2*R(1,0)*R(1,2)*qdd_d[4]), (qdd_d[3]*(R(0,1)*R(1,2) + R(0,2)*R(1,1)) + qdd_d[5]*(R(1,1)*R(2,2) + R(1,2)*R(2,1)) + qd_d[3]*(R(0,2)*(R(0,1)*qd[5] - R(2,1)*qd[3]) + R(0,1)*(R(0,2)*qd[5] - R(2,2)*qd[3])) + qd_d[4]*(R(1,2)*(R(0,1)*qd[5] - R(2,1)*qd[3]) + R(1,1)*(R(0,2)*qd[5] - R(2,2)*qd[3])) + qd_d[5]*(R(2,2)*(R(0,1)*qd[5] - R(2,1)*qd[3]) + R(2,1)*(R(0,2)*qd[5] - R(2,2)*qd[3])) + 2*R(1,1)*R(1,2)*qdd_d[4]), (pow(R(1,0),2)*qdd_d[4] + R(0,0)*R(1,0)*qdd_d[3] + R(1,0)*R(2,0)*qdd_d[5] + R(0,0)*qd_d[3]*(R(0,0)*qd[5] - R(2,0)*qd[3]) + R(1,0)*qd_d[4]*(R(0,0)*qd[5] - R(2,0)*qd[3]) + R(2,0)*qd_d[5]*(R(0,0)*qd[5] - R(2,0)*qd[3])), (pow(R(1,1),2)*qdd_d[4] + R(0,1)*R(1,1)*qdd_d[3] + R(1,1)*R(2,1)*qdd_d[5] + R(0,1)*qd_d[3]*(R(0,1)*qd[5] - R(2,1)*qd[3]) + R(1,1)*qd_d[4]*(R(0,1)*qd[5] - R(2,1)*qd[3]) + R(2,1)*qd_d[5]*(R(0,1)*qd[5] - R(2,1)*qd[3])), (pow(R(1,2),2)*qdd_d[4] + R(0,2)*R(1,2)*qdd_d[3] + R(1,2)*R(2,2)*qdd_d[5] + R(0,2)*qd_d[3]*(R(0,2)*qd[5] - R(2,2)*qd[3]) + R(1,2)*qd_d[4]*(R(0,2)*qd[5] - R(2,2)*qd[3]) + R(2,2)*qd_d[5]*(R(0,2)*qd[5] - R(2,2)*qd[3])), MatrixXd::Zero(1,3),
 			-(R(0,0)*qdd_d[1] - R(1,0)*qdd_d[0]), -(R(0,1)*qdd_d[1] - R(1,1)*qdd_d[0]), -(R(0,2)*qdd_d[1] - R(1,2)*qdd_d[0]), 0, (qdd_d[3]*(R(0,1)*R(2,1) + R(0,2)*R(2,2)) + qdd_d[4]*(R(1,1)*R(2,1) + R(1,2)*R(2,2)) + qdd_d[5]*(pow(R(2,1),2) + pow(R(2,2),2)) - qd_d[3]*(R(0,1)*(R(0,1)*qd[4] - R(1,1)*qd[3]) + R(0,2)*(R(0,2)*qd[4] - R(1,2)*qd[3])) - qd_d[4]*(R(1,1)*(R(0,1)*qd[4] - R(1,1)*qd[3]) + R(1,2)*(R(0,2)*qd[4] - R(1,2)*qd[3])) - qd_d[5]*(R(2,1)*(R(0,1)*qd[4] - R(1,1)*qd[3]) + R(2,2)*(R(0,2)*qd[4] - R(1,2)*qd[3]))), (qd_d[3]*(R(0,1)*(R(0,0)*qd[4] - R(1,0)*qd[3]) + R(0,0)*(R(0,1)*qd[4] - R(1,1)*qd[3])) - qdd_d[4]*(R(1,0)*R(2,1) + R(1,1)*R(2,0)) - qdd_d[3]*(R(0,0)*R(2,1) + R(0,1)*R(2,0)) + qd_d[4]*(R(1,1)*(R(0,0)*qd[4] - R(1,0)*qd[3]) + R(1,0)*(R(0,1)*qd[4] - R(1,1)*qd[3])) + qd_d[5]*(R(2,1)*(R(0,0)*qd[4] - R(1,0)*qd[3]) + R(2,0)*(R(0,1)*qd[4] - R(1,1)*qd[3])) - 2*R(2,0)*R(2,1)*qdd_d[5]), (qd_d[3]*(R(0,2)*(R(0,0)*qd[4] - R(1,0)*qd[3]) + R(0,0)*(R(0,2)*qd[4] - R(1,2)*qd[3])) - qdd_d[4]*(R(1,0)*R(2,2) + R(1,2)*R(2,0)) - qdd_d[3]*(R(0,0)*R(2,2) + R(0,2)*R(2,0)) + qd_d[4]*(R(1,2)*(R(0,0)*qd[4] - R(1,0)*qd[3]) + R(1,0)*(R(0,2)*qd[4] - R(1,2)*qd[3])) + qd_d[5]*(R(2,2)*(R(0,0)*qd[4] - R(1,0)*qd[3]) + R(2,0)*(R(0,2)*qd[4] - R(1,2)*qd[3])) - 2*R(2,0)*R(2,2)*qdd_d[5]), (qdd_d[3]*(R(0,0)*R(2,0) + R(0,2)*R(2,2)) + qdd_d[4]*(R(1,0)*R(2,0) + R(1,2)*R(2,2)) + qdd_d[5]*(pow(R(2,0),2) + pow(R(2,2),2)) - qd_d[3]*(R(0,0)*(R(0,0)*qd[4] - R(1,0)*qd[3]) + R(0,2)*(R(0,2)*qd[4] - R(1,2)*qd[3])) - qd_d[4]*(R(1,0)*(R(0,0)*qd[4] - R(1,0)*qd[3]) + R(1,2)*(R(0,2)*qd[4] - R(1,2)*qd[3])) - qd_d[5]*(R(2,0)*(R(0,0)*qd[4] - R(1,0)*qd[3]) + R(2,2)*(R(0,2)*qd[4] - R(1,2)*qd[3]))),  (qd_d[3]*(R(0,2)*(R(0,1)*qd[4] - R(1,1)*qd[3]) + R(0,1)*(R(0,2)*qd[4] - R(1,2)*qd[3])) - qdd_d[4]*(R(1,1)*R(2,2) + R(1,2)*R(2,1)) - qdd_d[3]*(R(0,1)*R(2,2) + R(0,2)*R(2,1)) + qd_d[4]*(R(1,2)*(R(0,1)*qd[4] - R(1,1)*qd[3]) + R(1,1)*(R(0,2)*qd[4] - R(1,2)*qd[3])) + qd_d[5]*(R(2,2)*(R(0,1)*qd[4] - R(1,1)*qd[3]) + R(2,1)*(R(0,2)*qd[4] - R(1,2)*qd[3])) - 2*R(2,1)*R(2,2)*qdd_d[5]), (qdd_d[3]*(R(0,0)*R(2,0) + R(0,1)*R(2,1)) + qdd_d[4]*(R(1,0)*R(2,0) + R(1,1)*R(2,1)) + qdd_d[5]*(pow(R(2,0),2) + pow(R(2,1),2)) - qd_d[3]*(R(0,0)*(R(0,0)*qd[4] - R(1,0)*qd[3]) + R(0,1)*(R(0,1)*qd[4] - R(1,1)*qd[3])) - qd_d[4]*(R(1,0)*(R(0,0)*qd[4] - R(1,0)*qd[3]) + R(1,1)*(R(0,1)*qd[4] - R(1,1)*qd[3])) - qd_d[5]*(R(2,0)*(R(0,0)*qd[4] - R(1,0)*qd[3]) + R(2,1)*(R(0,1)*qd[4] - R(1,1)*qd[3]))), (qdd_d[3]*(R(0,0)*R(2,1) + R(0,1)*R(2,0)) + qdd_d[4]*(R(1,0)*R(2,1) + R(1,1)*R(2,0)) - qd_d[3]*(R(0,1)*(R(0,0)*qd[4] - R(1,0)*qd[3]) + R(0,0)*(R(0,1)*qd[4] - R(1,1)*qd[3])) - qd_d[4]*(R(1,1)*(R(0,0)*qd[4] - R(1,0)*qd[3]) + R(1,0)*(R(0,1)*qd[4] - R(1,1)*qd[3])) - qd_d[5]*(R(2,1)*(R(0,0)*qd[4] - R(1,0)*qd[3]) + R(2,0)*(R(0,1)*qd[4] - R(1,1)*qd[3])) + 2*R(2,0)*R(2,1)*qdd_d[5]), (qdd_d[3]*(R(0,0)*R(2,2) + R(0,2)*R(2,0)) + qdd_d[4]*(R(1,0)*R(2,2) + R(1,2)*R(2,0)) - qd_d[3]*(R(0,2)*(R(0,0)*qd[4] - R(1,0)*qd[3]) + R(0,0)*(R(0,2)*qd[4] - R(1,2)*qd[3])) - qd_d[4]*(R(1,2)*(R(0,0)*qd[4] - R(1,0)*qd[3]) + R(1,0)*(R(0,2)*qd[4] - R(1,2)*qd[3])) - qd_d[5]*(R(2,2)*(R(0,0)*qd[4] - R(1,0)*qd[3]) + R(2,0)*(R(0,2)*qd[4] - R(1,2)*qd[3])) + 2*R(2,0)*R(2,2)*qdd_d[5]), (qdd_d[3]*(R(0,1)*R(2,2) + R(0,2)*R(2,1)) + qdd_d[4]*(R(1,1)*R(2,2) + R(1,2)*R(2,1)) - qd_d[3]*(R(0,2)*(R(0,1)*qd[4] - R(1,1)*qd[3]) + R(0,1)*(R(0,2)*qd[4] - R(1,2)*qd[3])) - qd_d[4]*(R(1,2)*(R(0,1)*qd[4] - R(1,1)*qd[3]) + R(1,1)*(R(0,2)*qd[4] - R(1,2)*qd[3])) - qd_d[5]*(R(2,2)*(R(0,1)*qd[4] - R(1,1)*qd[3]) + R(2,1)*(R(0,2)*qd[4] - R(1,2)*qd[3])) + 2*R(2,1)*R(2,2)*qdd_d[5]), (pow(R(2,0),2)*qdd_d[5] + R(0,0)*R(2,0)*qdd_d[3] + R(1,0)*R(2,0)*qdd_d[4] - R(0,0)*qd_d[3]*(R(0,0)*qd[4] - R(1,0)*qd[3]) - R(1,0)*qd_d[4]*(R(0,0)*qd[4] - R(1,0)*qd[3]) - R(2,0)*qd_d[5]*(R(0,0)*qd[4] - R(1,0)*qd[3])), (pow(R(2,1),2)*qdd_d[5] + R(0,1)*R(2,1)*qdd_d[3] + R(1,1)*R(2,1)*qdd_d[4] - R(0,1)*qd_d[3]*(R(0,1)*qd[4] - R(1,1)*qd[3]) - R(1,1)*qd_d[4]*(R(0,1)*qd[4] - R(1,1)*qd[3]) - R(2,1)*qd_d[5]*(R(0,1)*qd[4] - R(1,1)*qd[3])), (pow(R(2,2),2)*qdd_d[5] + R(0,2)*R(2,2)*qdd_d[3] + R(1,2)*R(2,2)*qdd_d[4] - R(0,2)*qd_d[3]*(R(0,2)*qd[4] - R(1,2)*qd[3]) - R(1,2)*qd_d[4]*(R(0,2)*qd[4] - R(1,2)*qd[3]) - R(2,2)*qd_d[5]*(R(0,2)*qd[4] - R(1,2)*qd[3])), MatrixXd::Zero(1,3);
+	//ROS_INFO("built Y");
 	return Yout;
 }
-
 MatrixXd Minv(Matrix3d R, VectorXd a){
 	Vector3d ri;
-	ri << a[15], a[16], a[17];
+	ri << a[16], a[17], a[18];
 	Matrix6d Mout;
 	Mout << MatrixXd::Identity(3,3), MatrixXd::Zero(3,3),
-			-R*cross(ri), MatrixXd::Identity(3,3);
+			-cross(R*ri), MatrixXd::Identity(3,3);
+	//ROS_INFO("built Minv");
 	return Mout;
 }
 
 MatrixXd Z(Matrix3d R, Vector6d F){
 	//takes in R (sensor to world) and F (in N), returns regressor Z
-	MatrixXd Zout(6,18);
-	Zout << MatrixXd::Zero(3,18),
-			MatrixXd::Zero(1,15), (F[1]*R(2,0) - F[2]*R(1,0)), (F[1]*R(2,1) - F[2]*R(1,1)), (F[1]*R(2,2) - F[2]*R(1,2)),
-			MatrixXd::Zero(1,15), (F[2]*R(0,0) - F[0]*R(2,0)), (F[2]*R(0,1) - F[0]*R(2,1)), (F[2]*R(0,2) - F[0]*R(2,2)),
-			MatrixXd::Zero(1,15), (F[0]*R(1,0) - F[1]*R(0,0)), (F[0]*R(1,1) - F[1]*R(0,1)), (F[0]*R(1,2) - F[1]*R(0,2));
+	MatrixXd Zout(6,19);
+	Zout << MatrixXd::Zero(3,19),
+			MatrixXd::Zero(1,16), (F[1]*R(2,0) - F[2]*R(1,0)), (F[1]*R(2,1) - F[2]*R(1,1)), (F[1]*R(2,2) - F[2]*R(1,2)),
+			MatrixXd::Zero(1,16), (F[2]*R(0,0) - F[0]*R(2,0)), (F[2]*R(0,1) - F[0]*R(2,1)), (F[2]*R(0,2) - F[0]*R(2,2)),
+			MatrixXd::Zero(1,16), (F[0]*R(1,0) - F[1]*R(0,0)), (F[0]*R(1,1) - F[1]*R(0,1)), (F[0]*R(1,2) - F[1]*R(0,2));
+	//ROS_INFO("built Z");
 	return Zout;
 }
 
