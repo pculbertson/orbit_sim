@@ -32,9 +32,9 @@ class Controller{
 	Matrix<double,19,19> Gamma;
 	ros::Publisher cmd_pub;
 	ros::Publisher state_pub;
-	ros::Publisher path_pub;
+	ros::Publisher lin_err_pub;
+	ros::Publisher ang_err_pub;
 	int seq;
-	nav_msgs::Path path;
 	geometry_msgs::PoseStamped pose;
 	std_msgs::Header h;
 	public:
@@ -68,11 +68,11 @@ Controller::Controller(int input, ros::NodeHandle n){
 	this->L = lW*Matrix6d::Identity();
 	this->cmd_pub = n.advertise<geometry_msgs::Wrench>("wrenchPlugin/wrenchCommands",1000); //remapped in launch file to correct topic
 	this->state_pub = n.advertise<orbit_sim::state>("controllerState",1000);
-	path_pub = n.advertise<nav_msgs::Path>("orbit_path",1000);
+	lin_err_pub = n.advertise<geometry_msgs::Vector3>("lin_err",1000);
+	ang_err_pub = n.advertise<geometry_msgs::Vector3>("ang_err",1000);
 	h = std_msgs::Header();
 	h.frame_id = "1";
 	pose = geometry_msgs::PoseStamped();
-	path = nav_msgs::Path();
 	startTime = 0;
 };
 
@@ -185,6 +185,17 @@ void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
 		state_msg.x = xmsg;
 		state_msg.xm = xm_msg;
 
+		geometry_msgs::Vector3 lin_err;
+		geometry_msgs::Vector3 ang_err;
+
+		lin_err.x = e(0);
+		lin_err.y = e(1);
+		lin_err.z = e(2);
+
+		ang_err.x = e(3);
+		ang_err.y = e(4);
+		ang_err.z = e(5);
+
 		//express desired linear position in global frame
 		//Vector3d q_des_lin = worldToBody.transpose()*q_des.head<3>();
 
@@ -200,6 +211,8 @@ void Controller::stateCallback(const gazebo_msgs::LinkStates::ConstPtr& _msg){
 
 		this->cmd_pub.publish(cmdWrench); //this should be in body frame
 		this->state_pub.publish(state_msg);
+		lin_err_pub.publish(lin_err);
+		ang_err_pub.publish(ang_err);
 		this->time = currTime;
 	}
 }
